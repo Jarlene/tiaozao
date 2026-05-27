@@ -1,0 +1,63 @@
+# Tiaozao (跳蚤市场) Development Infrastructure
+# Run: docker compose up -d
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tiaozao-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-tiaozao}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tiaozao123}
+      POSTGRES_DB: ${DB_NAME:-tiaozao}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-tiaozao} -d ${DB_NAME:-tiaozao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: tiaozao-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio:
+    image: minio/minio:latest
+    container_name: tiaozao-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-tiaozao_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-tiaozao_secret}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
