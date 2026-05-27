@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跳蚤市场 - 商品发布</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="/" class="brand">跳蚤市场</a>
+      <div class="nav-links">
+        <a href="/">首页</a>
+        <a href="/publish.html">发布商品</a>
+      </div>
+    </div>
+  </nav>
+  <main class="container">
+    <h1>商品列表</h1>
+    <div class="filters">
+      <select id="categoryFilter" onchange="loadProducts()">
+        <option value="">全部分类</option>
+      </select>
+      <select id="statusFilter" onchange="loadProducts()" style="display:none;">
+        <option value="active">在售</option>
+        <option value="draft">草稿</option>
+        <option value="inactive">已下架</option>
+      </select>
+    </div>
+    <div id="productGrid" class="product-grid"></div>
+    <div id="pagination" class="pagination"></div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
