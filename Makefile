@@ -1,4 +1,4 @@
-.PHONY: all run build dev clean vendor
+.PHONY: all run build dev clean vendor migrate
 
 all: build
 
@@ -33,6 +33,11 @@ clean:
 
 test:
 	GONOSUMCHECK=* GONOSUMDB=* GOPROXY=file:///Users/jarlen/go/pkg/mod/cache/download,off go test ./...
+
+migrate:
+	@echo "Running migrations..."
+	psql "$${DATABASE_URL:-postgres://tiaozao:tiaozao123@localhost:5432/tiaozao?sslmode=disable}" -f migrations/001_create_orders.sql
+	@echo "Migrations complete."
 
 lint:
 	go vet ./...

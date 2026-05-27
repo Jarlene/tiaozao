@@ -17,6 +17,7 @@ func Setup(
 	uploadDir string,
 	categoryHandler *handler.CategoryHandler,
 	productHandler *handler.ProductHandler,
+	orderHandler *handler.OrderHandler,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -63,7 +64,15 @@ func Setup(
 			r.Get("/", productHandler.List)
 			r.Post("/images", productHandler.UploadImage)
 		})
-	})
+
+			// Order routes
+			r.Route("/orders", func(r chi.Router) {
+				r.Post("/", orderHandler.Create)
+				r.Get("/", orderHandler.List)
+				r.Get("/{id}", orderHandler.GetByID)
+				r.Put("/{id}/status", orderHandler.Transition)
+			})
+		})
 
 	// Serve static frontend for any non-API route
 	staticDir := "web"

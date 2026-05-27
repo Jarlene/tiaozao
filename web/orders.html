@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的订单 - 跳蚤市场</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    .order-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .order-tabs button { padding: 8px 16px; border: 1px solid #ddd; background: #fff; border-radius: 20px; cursor: pointer; font-size: 14px; }
+    .order-tabs button.active { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+    .order-card { border: 1px solid #eee; border-radius: 8px; padding: 16px; margin-bottom: 12px; background: #fff; }
+    .order-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .order-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 13px; color: #999; }
+    .order-status { font-weight: bold; color: #e74c3c; }
+    .order-item { display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid #f5f5f5; }
+    .order-item img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; background: #f5f5f5; }
+    .order-item-info { flex: 1; }
+    .order-item-title { font-size: 14px; margin-bottom: 4px; }
+    .order-item-price { color: #e74c3c; font-weight: bold; }
+    .order-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f5f5f5; }
+    .order-total { font-size: 14px; }
+    .order-total strong { color: #e74c3c; font-size: 18px; }
+    .order-actions { display: flex; gap: 8px; }
+    .order-actions button { padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #e74c3c; color: #fff; border: none; }
+    .btn-default { background: #fff; border: 1px solid #ddd; }
+    .btn-success { background: #27ae60; color: #fff; border: none; }
+    .empty-state { text-align: center; padding: 60px 20px; color: #999; }
+    .role-toggle { display: flex; gap: 0; margin-bottom: 16px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; width: fit-content; }
+    .role-toggle button { padding: 8px 20px; border: none; background: #fff; cursor: pointer; font-size: 14px; }
+    .role-toggle button.active { background: #e74c3c; color: #fff; }
+    .order-no { cursor: pointer; }
+    .order-no:hover { color: #e74c3c; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="/" class="brand">跳蚤市场</a>
+      <div class="nav-links">
+        <a href="/">首页</a>
+        <a href="/publish.html">发布商品</a>
+        <a href="/orders.html" class="active">我的订单</a>
+      </div>
+    </div>
+  </nav>
+  <main class="container">
+    <h1>我的订单</h1>
+    <div class="role-toggle">
+      <button id="roleBuyer" class="active" onclick="switchRole('buyer')">买家</button>
+      <button id="roleSeller" onclick="switchRole('seller')">卖家</button>
+    </div>
+    <div class="order-tabs" id="orderTabs"></div>
+    <div id="orderList"></div>
+    <div id="pagination" class="pagination"></div>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+    let currentRole = 'buyer';
+    let currentStatus = '';
+    let currentPage = 1;
+
+    const STATUS_TABS = [
+      { key: '', label: '全部' },
+      { key: 'pending', label: '待付款' },
+      { key: 'paid', label: '待发货' },
+      { key: 'shipped', label: '待收货' },
+      { key: 'received', label: '已完成' },
+      { key: 'cancelled', label: '已取消' },
+      { key: 'refunding', label: '退款中' },
+      { key: 'refunded', label: '已退款' },
+    ];
+
+    const STATUS_LABELS = {
+      pending: '待付款', paid: '待发货', shipped: '待收货',
+      received: '已完成', completed: '已完成',
+      cancelled: '已取消', refunding: '退款中', refunded: '已退款',
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      renderTabs();
+      loadOrders();
+    });
+
+    function renderTabs() {
+      const el = document.getElementById('orderTabs');
+      el.innerHTML = STATUS_TABS.map(t =>
+        `<button class="${t.key === currentStatus ? 'active' : ''}" onclick="switchStatus('${t.key}')">${t.label}</button>`
+      ).join('');
+    }
+
+    function switchRole(role) {
+      currentRole = role;
+      currentStatus = '';
+      currentPage = 1;
+      document.getElementById('roleBuyer').className = role === 'buyer' ? 'active' : '';
+      document.getElementById('roleSeller').className = role === 'seller' ? 'active' : '';
+      renderTabs();
+      loadOrders();
+    }
+
+    function switchStatus(status) {
+      currentStatus = status;
+      currentPage = 1;
+      renderTabs();
+      loadOrders();
+    }
+
+    async function loadOrders() {
+      const el = document.getElementById('orderList');
+      el.innerHTML = '<p>加载中...</p>';
+
+      try {
+        const params = new URLSearchParams({ role: currentRole, page: currentPage, size: 10 });
+        if (currentStatus) params.set('status', currentStatus);
+
+        const data = await api('/orders?' + params.toString());
+        el.innerHTML = '';
+
+        if (data.items.length === 0) {
+          el.innerHTML = '<div class="empty-state">暂无订单</div>';
+          renderPagination(data.total, data.page, data.size);
+          return;
+        }
+
+        data.items.forEach(order => {
+          const card = document.createElement('div');
+          card.className = 'order-card';
+
+          const orderDate = new Date(order.created_at).toLocaleString('zh-CN');
+          const statusLabel = STATUS_LABELS[order.status] || order.status;
+
+          let itemHtml = '';
+          (order.items || []).forEach(item => {
+            itemHtml += `
+              <div class="order-item">
+                <img src="${item.product_image || ''}" alt="${escapeHtml(item.product_title)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22><rect fill=%22%23eee%22 width=%2280%22 height=%2280%22/><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23aaa%22 font-size=%2212%22>无图</text></svg>'">
+                <div class="order-item-info">
+                  <div class="order-item-title">${escapeHtml(item.product_title)}</div>
+                  <div>¥${item.price.toFixed(2)} × ${item.quantity}</div>
+                </div>
+                <div class="order-item-price">¥${item.subtotal.toFixed(2)}</div>
+              </div>
+            `;
+          });
+
+          const actionsHtml = getActionButtons(order);
+          card.innerHTML = `
+            <div class="order-header">
+              <span class="order-no" onclick="window.location='/order-detail.html?id=${order.id}'">订单号: ${order.order_no}</span>
+              <span class="order-status">${statusLabel}</span>
+            </div>
+            ${itemHtml}
+            <div class="order-footer">
+              <div class="order-total">合计: <strong>¥${order.pay_amount.toFixed(2)}</strong></div>
+              <div class="order-actions">${actionsHtml}</div>
+            </div>
+          `;
+          el.appendChild(card);
+        });
+
+        renderPagination(data.total, data.page, data.size);
+      } catch (e) {
+        el.innerHTML = `<div class="empty-state">加载失败: ${e.message}</div>`;
+      }
+    }
+
+    function getActionButtons(order) {
+      const btns = [];
+      if (currentRole === 'buyer') {
+        if (order.status === 'pending') {
+          btns.push('<button class="btn-primary" onclick="orderAction(' + order.id + ', \'pay\')">立即付款</button>');
+          btns.push('<button class="btn-default" onclick="orderAction(' + order.id + ', \'cancel\')">取消订单</button>');
+        } else if (order.status === 'shipped') {
+          btns.push('<button class="btn-success" onclick="orderAction(' + order.id + ', \'receive\')">确认收货</button>');
+        } else if (order.status === 'paid') {
+          btns.push('<button class="btn-default" onclick="orderAction(' + order.id + ', \'refund\')">申请退款</button>');
+        } else if (order.status === 'received') {
+          btns.push('<button class="btn-primary" onclick="orderAction(' + order.id + ', \'complete\')">确认完成</button>');
+        } else if (order.status === 'refunding') {
+          btns.push('<span style="color:#999;font-size:13px">处理中...</span>');
+        }
+      } else {
+        if (order.status === 'paid') {
+          btns.push('<button class="btn-success" onclick="orderAction(' + order.id + ', \'ship\')">确认发货</button>');
+        }
+      }
+      btns.push('<button class="btn-default" onclick="window.location=\'/order-detail.html?id=' + order.id + '\'">查看详情</button>');
+      return btns.join('');
+    }
+
+    async function orderAction(orderId, action) {
+      const labels = { pay: '付款', ship: '发货', receive: '收货', complete: '完成', cancel: '取消', refund: '退款' };
+      if (!confirm('确认' + (labels[action] || action) + '？')) return;
+
+      try {
+        await api('/orders/' + orderId + '/status', {
+          method: 'PUT',
+          body: JSON.stringify({ action }),
+        });
+        loadOrders();
+      } catch (e) {
+        alert('操作失败: ' + e.message);
+      }
+    }
+  </script>
+</body>
+</html>

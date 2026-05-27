@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>订单详情 - 跳蚤市场</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    .back-link { display: inline-block; margin-bottom: 20px; color: #333; text-decoration: none; font-size: 14px; }
+    .back-link:hover { color: #e74c3c; }
+    .detail-card { background: #fff; border-radius: 8px; padding: 24px; border: 1px solid #eee; }
+    .order-info { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+    .order-no { font-size: 18px; font-weight: bold; }
+    .order-status { font-size: 16px; font-weight: bold; color: #e74c3c; }
+    .timeline { display: flex; justify-content: space-between; margin: 24px 0; padding: 20px 0; border-top: 1px solid #eee; border-bottom: 1px solid #eee; }
+    .timeline-step { text-align: center; flex: 1; position: relative; }
+    .timeline-step::after { content: ''; position: absolute; top: 12px; left: 50%; width: 100%; height: 2px; background: #eee; }
+    .timeline-step:last-child::after { display: none; }
+    .timeline-step .dot { width: 24px; height: 24px; border-radius: 50%; display: inline-block; margin-bottom: 8px; position: relative; z-index: 1; }
+    .timeline-step .dot.done { background: #27ae60; }
+    .timeline-step .dot.active { background: #e74c3c; }
+    .timeline-step .dot.wait { background: #ddd; }
+    .timeline-step .dot.cancelled { background: #999; }
+    .timeline-step .label { font-size: 12px; color: #666; }
+    .timeline-step .date { font-size: 11px; color: #999; margin-top: 4px; }
+    .items-section { margin: 20px 0; }
+    .item-row { display: flex; gap: 16px; padding: 12px 0; border-bottom: 1px solid #f5f5f5; align-items: center; }
+    .item-row img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; background: #f5f5f5; }
+    .item-info { flex: 1; }
+    .item-title { font-size: 15px; margin-bottom: 4px; }
+    .item-meta { font-size: 13px; color: #999; }
+    .item-subtotal { font-size: 16px; font-weight: bold; color: #e74c3c; }
+    .price-summary { margin: 20px 0; padding: 16px; background: #fafafa; border-radius: 4px; }
+    .price-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+    .price-row.total { font-size: 18px; font-weight: bold; border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px; }
+    .price-row.total .value { color: #e74c3c; }
+    .action-bar { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+    .action-bar button { padding: 10px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .error-state { text-align: center; padding: 60px 20px; color: #999; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="/" class="brand">跳蚤市场</a>
+      <div class="nav-links">
+        <a href="/">首页</a>
+        <a href="/publish.html">发布商品</a>
+        <a href="/orders.html">我的订单</a>
+      </div>
+    </div>
+  </nav>
+  <main class="container">
+    <a href="/orders.html" class="back-link">&larr; 返回订单列表</a>
+    <div id="orderDetail" class="detail-card">
+      <div class="error-state">加载中...</div>
+    </div>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+    const STATUS_LABELS = {
+      pending: '待付款', paid: '待发货', shipped: '待收货',
+      received: '已完成', completed: '已完成',
+      cancelled: '已取消', refunding: '退款中', refunded: '已退款',
+    };
+
+    document.addEventListener('DOMContentLoaded', loadOrderDetail);
+
+    async function loadOrderDetail() {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('id');
+      if (!id) { showError('缺少订单ID'); return; }
+
+      try {
+        const order = await api('/orders/' + id);
+        renderOrder(order);
+      } catch (e) {
+        showError('加载失败: ' + e.message);
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('orderDetail').innerHTML = `<div class="error-state">${msg}</div>`;
+    }
+
+    function renderOrder(order) {
+      const el = document.getElementById('orderDetail');
+      const statusLabel = STATUS_LABELS[order.status] || order.status;
+      const orderDate = new Date(order.created_at).toLocaleString('zh-CN');
+
+      // Timeline
+      const steps = [
+        { key: 'pending', label: '提交订单' },
+        { key: 'paid', label: '付款' },
+        { key: 'shipped', label: '卖家发货' },
+        { key: 'received', label: '确认收货' },
+      ];
+
+      const statusOrder = ['pending', 'paid', 'shipped', 'received', 'completed'];
+      const currentIdx = statusOrder.indexOf(order.status);
+
+      const timelineHtml = steps.map((step, i) => {
+        let dotClass = 'wait';
+        let dateStr = '';
+        if (order.status === 'cancelled' || order.status === 'refunded') {
+          if (i <= currentIdx) {
+            dotClass = 'done';
+            if (i === 0) dateStr = orderDate;
+            if (i === 1 && order.paid_at) dateStr = new Date(order.paid_at).toLocaleString('zh-CN');
+          } else {
+            dotClass = 'cancelled';
+          }
+        } else if (order.status === 'refunding') {
+          if (i <= currentIdx) {
+            dotClass = 'done';
+            if (i === 0) dateStr = orderDate;
+            if (i === 1 && order.paid_at) dateStr = new Date(order.paid_at).toLocaleString('zh-CN');
+          }
+        } else {
+          if (i < currentIdx) {
+            dotClass = 'done';
+          } else if (i === currentIdx) {
+            dotClass = 'active';
+          }
+          if (i === 0) dateStr = orderDate;
+          if (i === 1 && order.paid_at) dateStr = new Date(order.paid_at).toLocaleString('zh-CN');
+          if (i === 2 && order.shipped_at) dateStr = new Date(order.shipped_at).toLocaleString('zh-CN');
+          if (i === 3 && order.received_at) dateStr = new Date(order.received_at).toLocaleString('zh-CN');
+        }
+
+        return `
+          <div class="timeline-step">
+            <div class="dot ${dotClass}"></div>
+            <div class="label">${step.label}</div>
+            ${dateStr ? `<div class="date">${dateStr}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // Items
+      let itemsHtml = '';
+      (order.items || []).forEach(item => {
+        itemsHtml += `
+          <div class="item-row">
+            <img src="${item.product_image || ''}" alt="${escapeHtml(item.product_title)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22><rect fill=%22%23eee%22 width=%2280%22 height=%2280%22/><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23aaa%22 font-size=%2212%22>无图</text></svg>'">
+            <div class="item-info">
+              <div class="item-title">${escapeHtml(item.product_title)}</div>
+              <div class="item-meta">¥${item.price.toFixed(2)} × ${item.quantity}</div>
+            </div>
+            <div class="item-subtotal">¥${item.subtotal.toFixed(2)}</div>
+          </div>
+        `;
+      });
+
+      // Price summary
+      const priceHtml = `
+        <div class="price-summary">
+          <div class="price-row"><span>商品总额</span><span>¥${order.total_amount.toFixed(2)}</span></div>
+          ${order.discount_amount > 0 ? `<div class="price-row"><span>优惠</span><span>-¥${order.discount_amount.toFixed(2)}</span></div>` : ''}
+          <div class="price-row total"><span>实付款</span><span class="value">¥${order.pay_amount.toFixed(2)}</span></div>
+        </div>
+      `;
+
+      // Action buttons
+      const actionsHtml = getDetailActions(order);
+
+      el.innerHTML = `
+        <div class="order-info">
+          <div>
+            <div class="order-no">订单号: ${order.order_no}</div>
+            <div style="margin-top:4px;font-size:13px;color:#999;">创建时间: ${orderDate}</div>
+          </div>
+          <div class="order-status">${statusLabel}</div>
+        </div>
+        ${order.remark ? `<div style="margin-bottom:16px;font-size:13px;color:#666;">备注: ${escapeHtml(order.remark)}</div>` : ''}
+        ${order.status !== 'cancelled' && order.status !== 'refunded' ? `<div class="timeline">${timelineHtml}</div>` : ''}
+        <div class="items-section"><h3>商品信息</h3>${itemsHtml}</div>
+        ${priceHtml}
+        ${actionsHtml ? `<div class="action-bar">${actionsHtml}</div>` : ''}
+      `;
+    }
+
+    function getDetailActions(order) {
+      const btns = [];
+      if (order.status === 'pending') {
+        btns.push('<button class="btn-primary" onclick="doAction(${order.id}, \'pay\')">立即付款</button>');
+        btns.push('<button class="btn-default" onclick="doAction(${order.id}, \'cancel\')">取消订单</button>');
+      } else if (order.status === 'paid') {
+        btns.push('<button class="btn-success" onclick="doAction(${order.id}, \'ship\')">确认发货</button>');
+        btns.push('<button class="btn-default" onclick="doAction(${order.id}, \'refund\')">申请退款</button>');
+      } else if (order.status === 'shipped') {
+        btns.push('<button class="btn-success" onclick="doAction(${order.id}, \'receive\')">确认收货</button>');
+      } else if (order.status === 'received') {
+        btns.push('<button class="btn-primary" onclick="doAction(${order.id}, \'complete\')">确认完成</button>');
+      }
+      return btns.join('');
+    }
+
+    async function doAction(orderId, action) {
+      const labels = { pay: '付款', ship: '发货', receive: '收货', complete: '完成', cancel: '取消', refund: '退款' };
+      if (!confirm('确认' + (labels[action] || action) + '？')) return;
+
+      try {
+        await api('/orders/' + orderId + '/status', {
+          method: 'PUT',
+          body: JSON.stringify({ action }),
+        });
+        loadOrderDetail();
+      } catch (e) {
+        alert('操作失败: ' + e.message);
+      }
+    }
+  </script>
+</body>
+</html>

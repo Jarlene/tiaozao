@@ -75,6 +75,14 @@ make dev
 | PUT | `/api/products/:id/delist` | Delist product |
 | POST | `/api/products/images` | Upload image (multipart form) |
 
+### Orders
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/orders` | Create order |
+| GET | `/api/orders` | List orders (`?role=buyer\|seller&status=&page=&size=`) |
+| GET | `/api/orders/:id` | Get order detail |
+| PUT | `/api/orders/:id/status` | Transition order status (`{"action":"pay\|ship\|receive\|cancel\|refund"}`) |
+
 ### Auth
 
 All `/api/*` routes use a development auth stub. Set `X-User-Id` header for a specific user ID, or it defaults to user 1. For token auth, send `Authorization: Bearer dev-token`.
@@ -84,6 +92,15 @@ All `/api/*` routes use a development auth stub. Set `X-User-Id` header for a sp
 - `/` — Product listing with category filter and pagination
 - `/publish.html` — Publish a new product
 - `/detail.html?id=N` — Product detail page
+- `/orders.html` — Order list (buyer/seller toggle + status filter)
+- `/order-detail.html?id=N` — Order detail page with timeline and actions
+
+## Database
+
+```bash
+# Run migrations
+make migrate
+```
 
 ## Architecture Decisions
 
