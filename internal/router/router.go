@@ -17,6 +17,7 @@ func Setup(
 	uploadDir string,
 	categoryHandler *handler.CategoryHandler,
 	productHandler *handler.ProductHandler,
+	commentHandler *handler.CommentHandler,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -62,6 +63,13 @@ func Setup(
 			r.Get("/{id}", productHandler.Get)
 			r.Get("/", productHandler.List)
 			r.Post("/images", productHandler.UploadImage)
+
+			// Comment routes (nested under products)
+			r.Route("/{productId}/comments", func(r chi.Router) {
+				r.Get("/", commentHandler.ListComments)
+				r.Post("/", commentHandler.CreateComment)
+				r.Post("/{commentId}/reply", commentHandler.ReplyToComment)
+			})
 		})
 	})
 

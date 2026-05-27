@@ -1,5 +1,5 @@
 bin/
-server
+/server
 .DS_Store
 uploads/
 *.log

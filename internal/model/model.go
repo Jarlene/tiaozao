@@ -42,3 +42,15 @@ type ProductImage struct {
 	SortOrder int    `json:"sort_order"`
 	IsCover   bool   `json:"is_cover"`
 }
+
+type Comment struct {
+	ID        uint       `json:"id"`
+	ProductID uint       `json:"product_id"`
+	UserID    string     `json:"user_id"`
+	Content   string     `json:"content"`
+	ParentID  *uint      `json:"parent_id,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	UserNick  string     `json:"user_nick,omitempty"`
+	Replies   []*Comment `json:"replies,omitempty"`
+}
