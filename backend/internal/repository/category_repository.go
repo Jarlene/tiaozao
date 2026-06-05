@@ -30,7 +30,9 @@ func (r *categoryRepository) Create(category *model.Category) error {
 }
 
 func (r *categoryRepository) Update(category *model.Category) error {
-	return r.db.Save(category).Error
+	return r.db.Model(&model.Category{}).Where("id = ?", category.ID).Updates(map[string]interface{}{
+		"name": category.Name,
+	}).Error
 }
 
 func (r *categoryRepository) Delete(id uint) error {

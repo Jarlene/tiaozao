@@ -63,7 +63,7 @@
             </template>
             <n-space vertical :size="4">
               <n-text strong depth="primary" style="font-size: 18px; color: #f5222d">
-                ¥{{ (product.price / 100).toFixed(2) }}
+                {{ formatPrice(product.price) }}
               </n-text>
               <n-text depth="3" style="font-size: 12px">
                 {{ product.created_at }}
@@ -94,6 +94,7 @@ import { useRoute } from 'vue-router'
 import { productAPI, categoryAPI } from '@/api/products'
 import type { ProductListItem, CategoryTreeItem } from '@/api/products'
 import { flattenCategories } from '@/utils/categories'
+import { formatPrice } from '@/utils/format'
 
 const route = useRoute()
 

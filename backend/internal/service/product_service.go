@@ -2,7 +2,11 @@ package service
 
 import (
 	stdErrors "errors"
+	"bytes"
+	"io"
+	"log"
 	"mime/multipart"
+	"net/http"
 	"path"
 	"strings"
 
@@ -27,7 +31,7 @@ const (
 
 // FileStorage 文件存储接口，支持 MinIO 实现和测试 mock
 type FileStorage interface {
-	UploadFile(bucket string, file multipart.File, header *multipart.FileHeader) (string, error)
+	UploadFile(bucket string, file io.Reader, header *multipart.FileHeader) (string, error)
 	DeleteFile(bucket string, objectKey string) error
 	GetFileURL(bucket string, objectKey string) string
 	ProductBucket() string
@@ -46,7 +50,7 @@ func NewProductService(productRepo repository.ProductRepository, categoryRepo re
 type CreateProductReq struct {
 	Title       string `json:"title" binding:"required,max=200"`
 	Description string `json:"description"`
-	Price       int64  `json:"price" binding:"required,min=0"`       // 单位：分
+	Price       int64  `json:"price" binding:"required,min=0"` // 单位：分
 	CategoryID  *uint  `json:"category_id"`
 	ImageIDs    []uint `json:"image_ids"` // 预上传的图片ID列表
 }
@@ -59,14 +63,14 @@ type UpdateProductReq struct {
 }
 
 type ProductListItem struct {
-	ID        uint                 `json:"id"`
-	Title     string               `json:"title"`
-	Price     int64                `json:"price"`
-	Status    model.ProductStatus  `json:"status"`
-	UserID    uint                 `json:"user_id"`
-	CreatedAt string               `json:"created_at"`
-	Images    []ProductImageItem   `json:"images,omitempty"`
-	User      *UserSimpleProfile   `json:"user,omitempty"`
+	ID        uint                `json:"id"`
+	Title     string              `json:"title"`
+	Price     int64               `json:"price"`
+	Status    model.ProductStatus `json:"status"`
+	UserID    uint                `json:"user_id"`
+	CreatedAt string              `json:"created_at"`
+	Images    []ProductImageItem  `json:"images,omitempty"`
+	User      *UserSimpleProfile  `json:"user,omitempty"`
 }
 
 type ProductDetail struct {
@@ -125,23 +129,30 @@ func (s *ProductService) Create(userID uint, req *CreateProductReq) (*ProductDet
 		CategoryID:  req.CategoryID,
 	}
 
-	if err := s.productRepo.Create(product); err != nil {
-		return nil, errors.ErrInternal, err
-	}
+	// 在事务中创建商品并关联图片，防止部分失败产生孤儿数据
+	err := s.productRepo.Transaction(func(txRepo repository.ProductRepository) error {
+		if err := txRepo.Create(product); err != nil {
+			return err
+		}
 
-	// 关联预上传的图片
-	if len(req.ImageIDs) > 0 {
-		for _, imgID := range req.ImageIDs {
-			img, err := s.productRepo.FindImageByID(imgID)
+		if len(req.ImageIDs) > 0 {
+			images, err := txRepo.FindImagesByIDs(req.ImageIDs)
 			if err != nil {
-				continue
+				return err
 			}
-			// 只关联未归属的图片
-			if img.ProductID == 0 {
-				img.ProductID = product.ID
-				s.productRepo.UpdateImage(img)
+			for i := range images {
+				if images[i].ProductID == 0 && images[i].UserID == userID {
+					images[i].ProductID = product.ID
+					if err := txRepo.UpdateImage(&images[i]); err != nil {
+						return err
+					}
+				}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.ErrInternal, err
 	}
 
 	return s.productDetailFromModel(product), errors.Success, nil
@@ -202,7 +213,7 @@ func (s *ProductService) Update(userID, productID uint, req *UpdateProductReq) (
 	return s.productDetailFromModel(updated), errors.Success, nil
 }
 
-// Delete 下架商品
+// Delete 下架商品（清理关联图片后改为下架状态）
 func (s *ProductService) Delete(userID, productID uint) (int, error) {
 	product, err := s.productRepo.FindByID(productID)
 	if err != nil {
@@ -222,7 +233,7 @@ func (s *ProductService) Delete(userID, productID uint) (int, error) {
 			continue
 		}
 		if err := s.minio.DeleteFile(s.minio.ProductBucket(), img.ObjectKey); err != nil {
-			// 即使单张图片删除失败，继续清理其余图片
+			log.Printf("[WARN] failed to delete image from MinIO: bucket=%s key=%s err=%v", s.minio.ProductBucket(), img.ObjectKey, err)
 		}
 	}
 
@@ -253,17 +264,12 @@ func (s *ProductService) List(page, pageSize int) (*PaginatedResult, int, error)
 		items[i] = s.listItemFromModel(&p)
 	}
 
-	totalPages := int(total) / pageSize
-	if int(total)%pageSize > 0 {
-		totalPages++
-	}
-
 	return &PaginatedResult{
 		Items:      items,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: totalPages,
+		TotalPages: calcTotalPages(int(total), pageSize),
 	}, errors.Success, nil
 }
 
@@ -286,17 +292,12 @@ func (s *ProductService) Search(keyword string, categoryID *uint, priceMin, pric
 		items[i] = s.listItemFromModel(&p)
 	}
 
-	totalPages := int(total) / pageSize
-	if int(total)%pageSize > 0 {
-		totalPages++
-	}
-
 	return &PaginatedResult{
 		Items:      items,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: totalPages,
+		TotalPages: calcTotalPages(int(total), pageSize),
 	}, errors.Success, nil
 }
 
@@ -319,17 +320,12 @@ func (s *ProductService) ListMyProducts(userID uint, status *model.ProductStatus
 		items[i] = s.listItemFromModel(&p)
 	}
 
-	totalPages := int(total) / pageSize
-	if int(total)%pageSize > 0 {
-		totalPages++
-	}
-
 	return &PaginatedResult{
 		Items:      items,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: totalPages,
+		TotalPages: calcTotalPages(int(total), pageSize),
 	}, errors.Success, nil
 }
 
@@ -339,6 +335,7 @@ func (s *ProductService) GetMyCounts(userID uint) (map[string]int64, int, error)
 	if err != nil {
 		return nil, errors.ErrInternal, err
 	}
+
 	return map[string]int64{
 		"active":   active,
 		"sold":     sold,
@@ -370,25 +367,30 @@ func (s *ProductService) UpdateStatus(userID, productID uint, status model.Produ
 
 // UploadImage 上传图片到 MinIO
 func (s *ProductService) UploadImage(userID uint, file multipart.File, header *multipart.FileHeader) (*ProductImageItem, int, error) {
-	// 验证文件类型
-	contentType := header.Header.Get("Content-Type")
-	ext, ok := allowedImageTypes[contentType]
-	if !ok {
-		// 也检查扩展名
-		ext = strings.ToLower(path.Ext(header.Filename))
-		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
-			return nil, errors.ErrFileFormat, nil
-		}
-		_ = ext
-	}
-
 	// 验证文件大小（5MB）
 	if header.Size > maxImageSize {
 		return nil, errors.ErrFileTooLarge, nil
 	}
 
-	// 上传到 MinIO
-	objectKey, err := s.minio.UploadFile(s.minio.ProductBucket(), file, header)
+	// 读取文件头（前512字节）检测实际 MIME 类型
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, errors.ErrInternal, err
+	}
+
+	// 基于文件内容进行 MIME 类型检测，防止 Content-Type 伪造
+	detectedType := http.DetectContentType(buf[:n])
+	if _, ok := allowedImageTypes[detectedType]; !ok {
+		ext := strings.ToLower(path.Ext(header.Filename))
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+			return nil, errors.ErrFileFormat, nil
+		}
+	}
+
+	// 组合已读取的文件头 + 剩余文件内容，确保上传完整
+	combined := io.MultiReader(bytes.NewReader(buf[:n]), file)
+	objectKey, err := s.minio.UploadFile(s.minio.ProductBucket(), combined, header)
 	if err != nil {
 		return nil, errors.ErrInternal, err
 	}
@@ -444,7 +446,7 @@ func (s *ProductService) DeleteImage(userID, imageID uint) (int, error) {
 
 	// 从 MinIO 删除
 	if err := s.minio.DeleteFile(s.minio.ProductBucket(), image.ObjectKey); err != nil {
-		// 即使 MinIO 删除失败，也继续删除数据库记录
+		log.Printf("[WARN] failed to delete image from MinIO: bucket=%s key=%s err=%v", s.minio.ProductBucket(), image.ObjectKey, err)
 	}
 
 	if err := s.productRepo.DeleteImage(imageID); err != nil {
@@ -480,9 +482,6 @@ func (s *ProductService) productDetailFromModel(p *model.Product) *ProductDetail
 	if len(p.Images) > 0 {
 		images := make([]ProductImageItem, 0, len(p.Images))
 		for _, img := range p.Images {
-			if img.DeletedAt.Valid {
-				continue
-			}
 			images = append(images, ProductImageItem{
 				ID:        img.ID,
 				URL:       s.minio.GetFileURL(s.minio.ProductBucket(), img.ObjectKey),
@@ -518,19 +517,26 @@ func (s *ProductService) listItemFromModel(p *model.Product) ProductListItem {
 	if len(p.Images) > 0 {
 		images := make([]ProductImageItem, 0, len(p.Images))
 		for _, img := range p.Images {
-			if img.DeletedAt.Valid {
-				continue
-			}
 			images = append(images, ProductImageItem{
 				ID:        img.ID,
 				URL:       s.minio.GetFileURL(s.minio.ProductBucket(), img.ObjectKey),
 				SortOrder: img.SortOrder,
 			})
 		}
-		if len(images) > 0 {
-			item.Images = images[:1] // 列表只展示第一张
-		}
+		item.Images = images[:1] // 列表只展示第一张
 	}
 
 	return item
+}
+
+// calcTotalPages 计算总页数
+func calcTotalPages(total, pageSize int) int {
+	if total == 0 {
+		return 0
+	}
+	pages := total / pageSize
+	if total%pageSize > 0 {
+		pages++
+	}
+	return pages
 }

@@ -130,12 +130,29 @@ func (s *CategoryService) GetFlatList() ([]model.Category, int, error) {
 	return categories, errors.Success, nil
 }
 
-// buildTree 构建树形结构
+// buildTree 构建树形结构（O(n) 算法，使用 map 按 parent_id 分组）
 func (s *CategoryService) buildTree(categories []model.Category, parentID *uint) []CategoryTreeItem {
-	var tree []CategoryTreeItem
+	childrenMap := make(map[uint][]model.Category)
+	var roots []model.Category
 	for _, c := range categories {
-		if (c.ParentID == nil && parentID == nil) || (c.ParentID != nil && parentID != nil && *c.ParentID == *parentID) {
-			children := s.buildTree(categories, &c.ID)
+		if c.ParentID == nil {
+			roots = append(roots, c)
+		} else {
+			childrenMap[*c.ParentID] = append(childrenMap[*c.ParentID], c)
+		}
+	}
+
+	var build func(pid *uint) []CategoryTreeItem
+	build = func(pid *uint) []CategoryTreeItem {
+		var items []model.Category
+		if pid == nil {
+			items = roots
+		} else {
+			items = childrenMap[*pid]
+		}
+		tree := make([]CategoryTreeItem, 0, len(items))
+		for _, c := range items {
+			children := build(&c.ID)
 			item := CategoryTreeItem{
 				ID:       c.ID,
 				Name:     c.Name,
@@ -146,6 +163,8 @@ func (s *CategoryService) buildTree(categories []model.Category, parentID *uint)
 			}
 			tree = append(tree, item)
 		}
+		return tree
 	}
-	return tree
+
+	return build(parentID)
 }

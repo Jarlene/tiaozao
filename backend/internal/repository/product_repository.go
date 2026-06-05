@@ -27,7 +27,11 @@ type ProductRepository interface {
 	DeleteImage(id uint) error
 	DeleteImagesByProduct(productID uint) error
 	FindImageByID(id uint) (*model.ProductImage, error)
+	FindImagesByIDs(ids []uint) ([]model.ProductImage, error)
 	ListImagesByProduct(productID uint) ([]model.ProductImage, error)
+
+	// 事务
+	Transaction(fc func(txRepo ProductRepository) error) error
 }
 
 type productRepository struct {
@@ -186,7 +190,10 @@ func (r *productRepository) CreateImage(image *model.ProductImage) error {
 }
 
 func (r *productRepository) UpdateImage(image *model.ProductImage) error {
-	return r.db.Save(image).Error
+	return r.db.Model(&model.ProductImage{}).Where("id = ?", image.ID).Updates(map[string]interface{}{
+		"product_id": image.ProductID,
+		"sort_order": image.SortOrder,
+	}).Error
 }
 
 func (r *productRepository) DeleteImage(id uint) error {
@@ -206,8 +213,21 @@ func (r *productRepository) FindImageByID(id uint) (*model.ProductImage, error) 
 	return &image, nil
 }
 
+func (r *productRepository) FindImagesByIDs(ids []uint) ([]model.ProductImage, error) {
+	var images []model.ProductImage
+	err := r.db.Where("id IN ?", ids).Find(&images).Error
+	return images, err
+}
+
 func (r *productRepository) ListImagesByProduct(productID uint) ([]model.ProductImage, error) {
 	var images []model.ProductImage
 	err := r.db.Where("product_id = ?", productID).Order("sort_order ASC").Find(&images).Error
 	return images, err
+}
+
+func (r *productRepository) Transaction(fc func(txRepo ProductRepository) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		txRepo := &productRepository{db: tx}
+		return fc(txRepo)
+	})
 }

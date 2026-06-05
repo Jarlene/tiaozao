@@ -68,7 +68,7 @@
 
         <n-space justify="end" style="margin-top: 16px">
           <n-button @click="showModal = false">取消</n-button>
-          <n-button type="primary" :loading="submitting" @click="handleSubmit">确定</n-button>
+          <n-button type="primary" attr-type="submit" :loading="submitting">确定</n-button>
         </n-space>
       </n-form>
     </n-modal>

@@ -44,7 +44,7 @@
             :accept="'image/jpeg,image/png,image/webp'"
             @before-upload="handleBeforeUpload"
           >
-            <n-button :disabled="uploadedImages.length >= 9">
+            <n-button :disabled="uploadedImages.length >= 9" :loading="uploading">
               上传图片（{{ uploadedImages.length }}/9）
             </n-button>
           </n-upload>
@@ -87,11 +87,13 @@ import type { FormRules, UploadFileInfo } from 'naive-ui'
 import { productAPI, categoryAPI } from '@/api/products'
 import type { ProductImageItem, CategoryTreeItem } from '@/api/products'
 import { flattenCategories } from '@/utils/categories'
+import { yuanToCents } from '@/utils/format'
 
 const router = useRouter()
 const message = useMessage()
 
 const submitting = ref(false)
+const uploading = ref(false)
 const uploadedImages = ref<ProductImageItem[]>([])
 
 interface ProductCreateForm {
@@ -140,11 +142,14 @@ async function handleBeforeUpload(data: { file: UploadFileInfo; fileList: Upload
   }
 
   try {
+    uploading.value = true
     const result = await productAPI.uploadImage(file)
     uploadedImages.value.push(result)
     message.success('上传成功')
   } catch {
     message.error('上传失败')
+  } finally {
+    uploading.value = false
   }
 
   return false // 阻止默认上传行为
@@ -171,7 +176,7 @@ async function handleSubmit() {
     const data = await productAPI.create({
       title: form.title,
       description: form.description,
-      price: Math.round(form.price * 100), // 元转分
+      price: yuanToCents(form.price),
       category_id: form.category_id || null,
       image_ids: uploadedImages.value.map((img) => img.id),
     })

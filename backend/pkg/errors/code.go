@@ -17,6 +17,8 @@ const (
 	ErrTooManyFiles = 40004 // 图片数量超出限制
 	ErrFileTooLarge = 40005 // 文件大小超出限制
 	ErrFileFormat   = 40006 // 文件格式不支持
+	ErrCategoryHasChildren = 40007 // 分类下有子分类，无法删除
+	ErrCategoryHasProducts = 40008 // 分类下有商品，无法删除
 
 	// 认证
 	ErrInvalidCredentials = 40101
@@ -27,11 +29,9 @@ const (
 	ErrForbidden = 40301 // 无权限操作
 
 	// 资源
-	ErrProductNotFound   = 40401
-	ErrImageNotFound     = 40402
-	ErrCategoryNotFound  = 40403
-	ErrCategoryHasChildren = 40007 // 分类下有子分类，无法删除
-	ErrCategoryHasProducts = 40008 // 分类下有商品，无法删除
+	ErrProductNotFound  = 40401
+	ErrImageNotFound    = 40402
+	ErrCategoryNotFound = 40403
 
 	// 服务端
 	ErrInternal = 50001
