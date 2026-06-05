@@ -1,38 +1,25 @@
-.PHONY: all run build dev clean vendor
+.PHONY: dev-backend dev-frontend dev-docker build-backend
 
-all: build
+# 启动后端（本地开发）
+dev-backend:
+	cd backend && go run ./cmd/server .env
 
-run:
-	go run ./cmd/server
+# 启动前端（本地开发）
+dev-frontend:
+	cd frontend && npm run dev
 
-build:
-	go build -o bin/server ./cmd/server
+# Docker 一键启动
+dev-docker:
+	docker compose up -d --build
 
-vendor:
-	GONOSUMCHECK=* GONOSUMDB=* GOPROXY=file:///Users/jarlen/go/pkg/mod/cache/download,off go mod vendor
+# 构建后端
+build-backend:
+	cd backend && CGO_ENABLED=0 go build -o bin/server ./cmd/server
 
-dev:
-	@echo "Starting infrastructure..."
-	docker compose up -d postgres
-	@echo "Waiting for postgres..."
-	@sleep 3
-	@echo "Starting application..."
-	go run ./cmd/server
-
-docker-up:
-	docker compose up -d
-
-docker-down:
+# 停止 Docker
+down:
 	docker compose down
 
-docker-build:
-	docker compose build
-
-clean:
-	rm -rf bin/ web/node_modules web/dist
-
-test:
-	GONOSUMCHECK=* GONOSUMDB=* GOPROXY=file:///Users/jarlen/go/pkg/mod/cache/download,off go test ./...
-
-lint:
-	go vet ./...
+# 查看日志
+logs:
+	docker compose logs -f
