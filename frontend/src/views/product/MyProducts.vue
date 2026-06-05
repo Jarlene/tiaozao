@@ -63,7 +63,7 @@
               </n-tag>
             </n-space>
             <n-text style="color: #f5222d; font-weight: bold">
-              ¥{{ (product.price / 100).toFixed(2) }}
+              {{ formatPrice(product.price) }}
             </n-text>
             <n-text depth="3" style="font-size: 12px">{{ product.created_at }}</n-text>
           </n-space>
@@ -116,6 +116,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { useMessage } from 'naive-ui'
 import { productAPI } from '@/api/products'
+import { formatPrice } from '@/utils/format'
 import type { ProductListItem } from '@/api/products'
 
 const message = useMessage()

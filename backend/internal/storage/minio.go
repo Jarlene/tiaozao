@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"mime/multipart"
 	"path"
@@ -59,7 +60,7 @@ func (m *MinIOClient) ProductBucket() string {
 }
 
 // UploadFile 上传文件到 MinIO，返回 object key
-func (m *MinIOClient) UploadFile(bucket string, file multipart.File, header *multipart.FileHeader) (string, error) {
+func (m *MinIOClient) UploadFile(bucket string, file io.Reader, header *multipart.FileHeader) (string, error) {
 	ctx := context.Background()
 
 	// 生成唯一 object key: user_id/uuid.ext
@@ -83,11 +84,16 @@ func (m *MinIOClient) DeleteFile(bucket string, objectKey string) error {
 }
 
 // GetFileURL 获取文件的公开访问 URL
+// 优先使用 PublicEndpoint（浏览器可解析的公网地址），否则回退到 Endpoint（可能为 Docker 内部地址）
 func (m *MinIOClient) GetFileURL(bucket string, objectKey string) string {
-	if m.cfg.UseSSL {
-		return fmt.Sprintf("https://%s/%s/%s", m.cfg.Endpoint, bucket, objectKey)
+	endpoint := m.cfg.PublicEndpoint
+	if endpoint == "" {
+		endpoint = m.cfg.Endpoint
 	}
-	return fmt.Sprintf("http://%s/%s/%s", m.cfg.Endpoint, bucket, objectKey)
+	if m.cfg.UseSSL {
+		return fmt.Sprintf("https://%s/%s/%s", endpoint, bucket, objectKey)
+	}
+	return fmt.Sprintf("http://%s/%s/%s", endpoint, bucket, objectKey)
 }
 
 // PresignedGetURL 生成预签名 GET URL（临时访问）

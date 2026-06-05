@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -36,15 +37,16 @@ type JWTConfig struct {
 }
 
 type MinIOConfig struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	UseSSL    bool
-	Bucket    string
+	Endpoint       string
+	PublicEndpoint string
+	AccessKey      string
+	SecretKey      string
+	UseSSL         bool
+	Bucket         string
 }
 
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 			Mode: getEnv("SERVER_MODE", "debug"),
@@ -63,12 +65,30 @@ func Load() *Config {
 			RefreshTokenTTL: getEnvDuration("REFRESH_TOKEN_TTL", 7*24*time.Hour),
 		},
 		MinIO: MinIOConfig{
-			Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
-			AccessKey: getEnv("MINIO_ACCESS_KEY", "flea_admin"),
+			Endpoint:       getEnv("MINIO_ENDPOINT", "localhost:9000"),
+			PublicEndpoint: getEnv("MINIO_PUBLIC_ENDPOINT", ""),
+			AccessKey:      getEnv("MINIO_ACCESS_KEY", "flea_admin"),
 			SecretKey: getEnv("MINIO_SECRET_KEY", "flea_admin_pass"),
 			UseSSL:    getEnvBool("MINIO_USE_SSL", false),
 			Bucket:    getEnv("MINIO_BUCKET", "flea-avatars"),
 		},
+	}
+
+	cfg.warnDefaults()
+	return cfg
+}
+
+// warnDefaults 在启动时检查关键配置使用默认值的情况
+func (c *Config) warnDefaults() {
+	defaultSecret := "flea-market-jwt-secret-key-change-in-production-32chars"
+	if c.JWT.Secret == defaultSecret {
+		log.Println("[WARN] JWT_SECRET is using default value, please set it via environment variable in production")
+	}
+	if c.MinIO.AccessKey == "flea_admin" {
+		log.Println("[WARN] MINIO_ACCESS_KEY is using default value, please set it via environment variable in production")
+	}
+	if c.MinIO.SecretKey == "flea_admin_pass" {
+		log.Println("[WARN] MINIO_SECRET_KEY is using default value, please set it via environment variable in production")
 	}
 }
 

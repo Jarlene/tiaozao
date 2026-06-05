@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
+	"io"
 	"mime/multipart"
+	"net/textproto"
 	"testing"
 
 	"flea-market/internal/model"
+	"flea-market/internal/repository"
 	errs "flea-market/pkg/errors"
 
 	"gorm.io/gorm"
@@ -25,14 +29,16 @@ type mockProductRepo struct {
 	updateImageFunc           func(image *model.ProductImage) error
 	deleteImageFunc           func(id uint) error
 	findImageByIDFunc         func(id uint) (*model.ProductImage, error)
+	findImagesByIDsFunc       func(ids []uint) ([]model.ProductImage, error)
 	deleteImagesByProductFunc func(productID uint) error
 	listImagesByProductFunc   func(productID uint) ([]model.ProductImage, error)
+	transactionFunc           func(fc func(txRepo repository.ProductRepository) error) error
 }
 
-func (m *mockProductRepo) Create(product *model.Product) error                       { return m.createFunc(product) }
-func (m *mockProductRepo) FindByID(id uint) (*model.Product, error)                  { return m.findByIDFunc(id) }
-func (m *mockProductRepo) Update(product *model.Product) error                       { return m.updateFunc(product) }
-func (m *mockProductRepo) Delete(id uint) error                                      { return m.deleteFunc(id) }
+func (m *mockProductRepo) Create(product *model.Product) error      { return m.createFunc(product) }
+func (m *mockProductRepo) FindByID(id uint) (*model.Product, error) { return m.findByIDFunc(id) }
+func (m *mockProductRepo) Update(product *model.Product) error      { return m.updateFunc(product) }
+func (m *mockProductRepo) Delete(id uint) error                     { return m.deleteFunc(id) }
 func (m *mockProductRepo) List(page, pageSize int, status model.ProductStatus) ([]model.Product, int64, error) {
 	return m.listFunc(page, pageSize, status)
 }
@@ -45,38 +51,54 @@ func (m *mockProductRepo) ListByUser(userID uint, status *model.ProductStatus, p
 func (m *mockProductRepo) CountByUserAndStatus(userID uint) (activeCount, soldCount, inactiveCount int64, err error) {
 	return m.countByUserFunc(userID)
 }
-func (m *mockProductRepo) CreateImage(image *model.ProductImage) error { return m.createImageFunc(image) }
-func (m *mockProductRepo) UpdateImage(image *model.ProductImage) error { return m.updateImageFunc(image) }
-func (m *mockProductRepo) DeleteImage(id uint) error                   { return m.deleteImageFunc(id) }
-func (m *mockProductRepo) FindImageByID(id uint) (*model.ProductImage, error) { return m.findImageByIDFunc(id) }
-func (m *mockProductRepo) DeleteImagesByProduct(productID uint) error { return m.deleteImagesByProductFunc(productID) }
+func (m *mockProductRepo) CreateImage(image *model.ProductImage) error {
+	return m.createImageFunc(image)
+}
+func (m *mockProductRepo) UpdateImage(image *model.ProductImage) error {
+	return m.updateImageFunc(image)
+}
+func (m *mockProductRepo) DeleteImage(id uint) error { return m.deleteImageFunc(id) }
+func (m *mockProductRepo) FindImageByID(id uint) (*model.ProductImage, error) {
+	return m.findImageByIDFunc(id)
+}
+func (m *mockProductRepo) FindImagesByIDs(ids []uint) ([]model.ProductImage, error) {
+	return m.findImagesByIDsFunc(ids)
+}
+func (m *mockProductRepo) DeleteImagesByProduct(productID uint) error {
+	return m.deleteImagesByProductFunc(productID)
+}
 func (m *mockProductRepo) ListImagesByProduct(productID uint) ([]model.ProductImage, error) {
 	return m.listImagesByProductFunc(productID)
+}
+func (m *mockProductRepo) Transaction(fc func(txRepo repository.ProductRepository) error) error {
+	return m.transactionFunc(fc)
 }
 
 // ---- Mock CategoryRepository ----
 
 type mockCategoryRepo struct {
-	createFunc           func(category *model.Category) error
-	updateFunc           func(category *model.Category) error
-	deleteFunc           func(id uint) error
-	findByIDFunc         func(id uint) (*model.Category, error)
-	listAllFunc          func() ([]model.Category, error)
-	listByParentIDFunc   func(parentID *uint) ([]model.Category, error)
+	createFunc             func(category *model.Category) error
+	updateFunc             func(category *model.Category) error
+	deleteFunc             func(id uint) error
+	findByIDFunc           func(id uint) (*model.Category, error)
+	listAllFunc            func() ([]model.Category, error)
+	listByParentIDFunc     func(parentID *uint) ([]model.Category, error)
 	countSubcategoriesFunc func(id uint) (int64, error)
-	countProductsFunc    func(id uint) (int64, error)
+	countProductsFunc      func(id uint) (int64, error)
 }
 
-func (m *mockCategoryRepo) Create(category *model.Category) error         { return notImplErr("Create") }
-func (m *mockCategoryRepo) Update(category *model.Category) error         { return notImplErr("Update") }
-func (m *mockCategoryRepo) Delete(id uint) error                          { return notImplErr("Delete") }
-func (m *mockCategoryRepo) FindByID(id uint) (*model.Category, error)     { return m.findByIDFunc(id) }
-func (m *mockCategoryRepo) ListAll() ([]model.Category, error)            { return notImplErr2("ListAll") }
-func (m *mockCategoryRepo) ListByParentID(parentID *uint) ([]model.Category, error) { return notImplErr2("ListByParentID") }
-func (m *mockCategoryRepo) CountSubcategories(id uint) (int64, error)     { return 0, nil }
-func (m *mockCategoryRepo) CountProducts(id uint) (int64, error)          { return 0, nil }
+func (m *mockCategoryRepo) Create(category *model.Category) error     { return notImplErr("Create") }
+func (m *mockCategoryRepo) Update(category *model.Category) error     { return notImplErr("Update") }
+func (m *mockCategoryRepo) Delete(id uint) error                      { return notImplErr("Delete") }
+func (m *mockCategoryRepo) FindByID(id uint) (*model.Category, error) { return m.findByIDFunc(id) }
+func (m *mockCategoryRepo) ListAll() ([]model.Category, error)        { return notImplErr2("ListAll") }
+func (m *mockCategoryRepo) ListByParentID(parentID *uint) ([]model.Category, error) {
+	return notImplErr2("ListByParentID")
+}
+func (m *mockCategoryRepo) CountSubcategories(id uint) (int64, error) { return 0, nil }
+func (m *mockCategoryRepo) CountProducts(id uint) (int64, error)      { return 0, nil }
 
-func notImplErr(name string) error            { panic("unexpected call: " + name) }
+func notImplErr(name string) error                      { panic("unexpected call: " + name) }
 func notImplErr2(name string) ([]model.Category, error) { panic("unexpected call: " + name) }
 
 // ---- Mock FileStorage ----
@@ -84,7 +106,7 @@ func notImplErr2(name string) ([]model.Category, error) { panic("unexpected call
 type mockMinIO struct{}
 
 func (m *mockMinIO) ProductBucket() string { return "products" }
-func (m *mockMinIO) UploadFile(bucket string, file multipart.File, header *multipart.FileHeader) (string, error) {
+func (m *mockMinIO) UploadFile(bucket string, file io.Reader, header *multipart.FileHeader) (string, error) {
 	return "test/object-key.jpg", nil
 }
 func (m *mockMinIO) DeleteFile(bucket string, objectKey string) error { return nil }
@@ -107,7 +129,12 @@ func newTestService(p mockProductRepo, c mockCategoryRepo) *ProductService {
 func TestCreateProduct_Success(t *testing.T) {
 	catID := uint(1)
 	svc := newTestService(
-		mockProductRepo{createFunc: func(product *model.Product) error { product.ID = 1; return nil }},
+		mockProductRepo{
+			createFunc: func(product *model.Product) error { product.ID = 1; return nil },
+			transactionFunc: func(fc func(txRepo repository.ProductRepository) error) error {
+				return fc(&mockProductRepo{createFunc: func(product *model.Product) error { product.ID = 1; return nil }})
+			},
+		},
 		mockCategoryRepo{findByIDFunc: func(id uint) (*model.Category, error) { return &model.Category{ID: id, Name: "Test"}, nil }},
 	)
 
@@ -143,7 +170,9 @@ func TestCreateProduct_CategoryNotFound(t *testing.T) {
 
 func TestGetByID_Success(t *testing.T) {
 	svc := newTestService(
-		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 1, "商品A", 500, model.ProductStatusActive), nil }},
+		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) {
+			return makeProduct(id, 1, "商品A", 500, model.ProductStatusActive), nil
+		}},
 		mockCategoryRepo{},
 	)
 	product, code, err := svc.GetByID(1)
@@ -197,7 +226,9 @@ func TestUpdate_Success(t *testing.T) {
 
 func TestUpdate_Forbidden(t *testing.T) {
 	svc := newTestService(
-		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 2, "商品", 500, model.ProductStatusActive), nil }},
+		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) {
+			return makeProduct(id, 2, "商品", 500, model.ProductStatusActive), nil
+		}},
 		mockCategoryRepo{},
 	)
 	_, code, err := svc.Update(1, 1, &UpdateProductReq{Title: "hack", Price: 100})
@@ -278,7 +309,9 @@ func TestDelete_Success(t *testing.T) {
 
 func TestDelete_Forbidden(t *testing.T) {
 	svc := newTestService(
-		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 2, "商品", 500, model.ProductStatusActive), nil }},
+		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) {
+			return makeProduct(id, 2, "商品", 500, model.ProductStatusActive), nil
+		}},
 		mockCategoryRepo{},
 	)
 	code, err := svc.Delete(1, 1)
@@ -445,47 +478,71 @@ func TestUpdateStatus_ActivateAndDeactivate(t *testing.T) {
 	t.Run("deactivate", func(t *testing.T) {
 		svc := newTestService(
 			mockProductRepo{
-				findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 1, "商品", 1000, model.ProductStatusActive), nil },
-				updateFunc:   func(product *model.Product) error {
-					if product.Status != model.ProductStatusInactive { t.Fatal("expected inactive") }
+				findByIDFunc: func(id uint) (*model.Product, error) {
+					return makeProduct(id, 1, "商品", 1000, model.ProductStatusActive), nil
+				},
+				updateFunc: func(product *model.Product) error {
+					if product.Status != model.ProductStatusInactive {
+						t.Fatal("expected inactive")
+					}
 					return nil
 				},
 			},
 			mockCategoryRepo{},
 		)
 		code, err := svc.UpdateStatus(1, 1, model.ProductStatusInactive)
-		if err != nil { t.Fatalf("unexpected error: %v", err) }
-		if code != errs.Success { t.Fatalf("expected success, got %d", code) }
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if code != errs.Success {
+			t.Fatalf("expected success, got %d", code)
+		}
 	})
 	t.Run("reactivate", func(t *testing.T) {
 		svc := newTestService(
 			mockProductRepo{
-				findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 1, "商品", 1000, model.ProductStatusInactive), nil },
-				updateFunc:   func(product *model.Product) error {
-					if product.Status != model.ProductStatusActive { t.Fatal("expected active on reactivation") }
+				findByIDFunc: func(id uint) (*model.Product, error) {
+					return makeProduct(id, 1, "商品", 1000, model.ProductStatusInactive), nil
+				},
+				updateFunc: func(product *model.Product) error {
+					if product.Status != model.ProductStatusActive {
+						t.Fatal("expected active on reactivation")
+					}
 					return nil
 				},
 			},
 			mockCategoryRepo{},
 		)
 		code, err := svc.UpdateStatus(1, 1, model.ProductStatusActive)
-		if err != nil { t.Fatalf("unexpected error: %v", err) }
-		if code != errs.Success { t.Fatalf("expected success, got %d", code) }
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if code != errs.Success {
+			t.Fatalf("expected success, got %d", code)
+		}
 	})
 	t.Run("mark as sold", func(t *testing.T) {
 		svc := newTestService(
 			mockProductRepo{
-				findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 1, "商品", 1000, model.ProductStatusActive), nil },
-				updateFunc:   func(product *model.Product) error {
-					if product.Status != model.ProductStatusSold { t.Fatal("expected sold") }
+				findByIDFunc: func(id uint) (*model.Product, error) {
+					return makeProduct(id, 1, "商品", 1000, model.ProductStatusActive), nil
+				},
+				updateFunc: func(product *model.Product) error {
+					if product.Status != model.ProductStatusSold {
+						t.Fatal("expected sold")
+					}
 					return nil
 				},
 			},
 			mockCategoryRepo{},
 		)
 		code, err := svc.UpdateStatus(1, 1, model.ProductStatusSold)
-		if err != nil { t.Fatalf("unexpected error: %v", err) }
-		if code != errs.Success { t.Fatalf("expected success, got %d", code) }
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if code != errs.Success {
+			t.Fatalf("expected success, got %d", code)
+		}
 	})
 }
 
@@ -495,32 +552,46 @@ func TestUpdateStatus_NotFound(t *testing.T) {
 		mockCategoryRepo{},
 	)
 	code, err := svc.UpdateStatus(1, 999, model.ProductStatusInactive)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.ErrProductNotFound { t.Fatalf("expected ErrProductNotFound (%d), got %d", errs.ErrProductNotFound, code) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.ErrProductNotFound {
+		t.Fatalf("expected ErrProductNotFound (%d), got %d", errs.ErrProductNotFound, code)
+	}
 }
 
 func TestUpdateStatus_Forbidden(t *testing.T) {
 	svc := newTestService(
-		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) { return makeProduct(id, 2, "商品", 1000, model.ProductStatusActive), nil }},
+		mockProductRepo{findByIDFunc: func(id uint) (*model.Product, error) {
+			return makeProduct(id, 2, "商品", 1000, model.ProductStatusActive), nil
+		}},
 		mockCategoryRepo{},
 	)
 	code, err := svc.UpdateStatus(1, 1, model.ProductStatusInactive)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.ErrForbidden { t.Fatalf("expected ErrForbidden (%d), got %d", errs.ErrForbidden, code) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.ErrForbidden {
+		t.Fatalf("expected ErrForbidden (%d), got %d", errs.ErrForbidden, code)
+	}
 }
 
 func TestSearch_WithKeyword(t *testing.T) {
 	svc := newTestService(
 		mockProductRepo{
 			searchFunc: func(keyword string, categoryID *uint, priceMin, priceMax int64, page, pageSize int) ([]model.Product, int64, error) {
-				if keyword != "手机" { t.Fatalf("expected '手机', got '%s'", keyword) }
+				if keyword != "手机" {
+					t.Fatalf("expected '手机', got '%s'", keyword)
+				}
 				return []model.Product{{ID: 1, Title: "手机", Price: 200000, Status: model.ProductStatusActive}}, 1, nil
 			},
 		},
 		mockCategoryRepo{},
 	)
 	result, code, err := svc.Search("手机", nil, 0, 0, 1, 20)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if code != errs.Success || result.Total != 1 {
 		t.Fatalf("expected success total=1, got code=%d total=%d", code, result.Total)
 	}
@@ -531,15 +602,21 @@ func TestSearch_WithPriceAndCategory(t *testing.T) {
 	svc := newTestService(
 		mockProductRepo{
 			searchFunc: func(keyword string, categoryID *uint, priceMin, priceMax int64, page, pageSize int) ([]model.Product, int64, error) {
-				if priceMin != 1000 || priceMax != 5000 { t.Fatalf("price range mismatch: min=%d max=%d", priceMin, priceMax) }
-				if categoryID == nil || *categoryID != 1 { t.Fatalf("expected categoryID 1") }
+				if priceMin != 1000 || priceMax != 5000 {
+					t.Fatalf("price range mismatch: min=%d max=%d", priceMin, priceMax)
+				}
+				if categoryID == nil || *categoryID != 1 {
+					t.Fatalf("expected categoryID 1")
+				}
 				return []model.Product{{ID: 1, Title: "商品", Price: 2000, Status: model.ProductStatusActive}}, 1, nil
 			},
 		},
 		mockCategoryRepo{},
 	)
 	result, code, err := svc.Search("", &catID, 1000, 5000, 1, 20)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if code != errs.Success || result.Total != 1 {
 		t.Fatalf("expected success total=1, got code=%d total=%d", code, result.Total)
 	}
@@ -553,9 +630,15 @@ func TestGetImage_Success(t *testing.T) {
 		mockCategoryRepo{},
 	)
 	image, code, err := svc.GetImage(1)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.Success { t.Fatalf("expected success, got %d", code) }
-	if image.URL == "" { t.Fatal("expected non-empty URL") }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.Success {
+		t.Fatalf("expected success, got %d", code)
+	}
+	if image.URL == "" {
+		t.Fatal("expected non-empty URL")
+	}
 }
 
 func TestGetImage_NotFound(t *testing.T) {
@@ -564,8 +647,12 @@ func TestGetImage_NotFound(t *testing.T) {
 		mockCategoryRepo{},
 	)
 	_, code, err := svc.GetImage(999)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.ErrImageNotFound { t.Fatalf("expected ErrImageNotFound (%d), got %d", errs.ErrImageNotFound, code) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.ErrImageNotFound {
+		t.Fatalf("expected ErrImageNotFound (%d), got %d", errs.ErrImageNotFound, code)
+	}
 }
 
 func TestDeleteImage_Success(t *testing.T) {
@@ -579,8 +666,12 @@ func TestDeleteImage_Success(t *testing.T) {
 		mockCategoryRepo{},
 	)
 	code, err := svc.DeleteImage(1, 1)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.Success { t.Fatalf("expected success, got %d", code) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.Success {
+		t.Fatalf("expected success, got %d", code)
+	}
 }
 
 func TestDeleteImage_Forbidden(t *testing.T) {
@@ -591,8 +682,12 @@ func TestDeleteImage_Forbidden(t *testing.T) {
 		mockCategoryRepo{},
 	)
 	code, err := svc.DeleteImage(1, 1)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.ErrForbidden { t.Fatalf("expected ErrForbidden (%d), got %d", errs.ErrForbidden, code) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.ErrForbidden {
+		t.Fatalf("expected ErrForbidden (%d), got %d", errs.ErrForbidden, code)
+	}
 }
 
 func TestDeleteImage_NotFound(t *testing.T) {
@@ -601,17 +696,143 @@ func TestDeleteImage_NotFound(t *testing.T) {
 		mockCategoryRepo{},
 	)
 	code, err := svc.DeleteImage(1, 999)
-	if err != nil { t.Fatalf("unexpected error: %v", err) }
-	if code != errs.ErrImageNotFound { t.Fatalf("expected ErrImageNotFound (%d), got %d", errs.ErrImageNotFound, code) }
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.ErrImageNotFound {
+		t.Fatalf("expected ErrImageNotFound (%d), got %d", errs.ErrImageNotFound, code)
+	}
 }
 
 func TestAllowedImageTypes(t *testing.T) {
 	for _, mime := range []string{"image/jpeg", "image/png", "image/webp"} {
-		if _, ok := allowedImageTypes[mime]; !ok { t.Fatalf("%s should be allowed", mime) }
+		if _, ok := allowedImageTypes[mime]; !ok {
+			t.Fatalf("%s should be allowed", mime)
+		}
 	}
 	for _, mime := range []string{"image/gif", "image/bmp", "image/svg+xml", "application/pdf"} {
-		if _, ok := allowedImageTypes[mime]; ok { t.Fatalf("%s should NOT be allowed", mime) }
+		if _, ok := allowedImageTypes[mime]; ok {
+			t.Fatalf("%s should NOT be allowed", mime)
+		}
 	}
 }
 
 func uintPtr(v uint) *uint { return &v }
+
+// testFile 模拟 multipart.File，用于 UploadImage 测试
+type testFile struct {
+	*bytes.Reader
+}
+
+func (f *testFile) ReadAt(p []byte, off int64) (int, error) { return f.Reader.ReadAt(p, off) }
+func (f *testFile) Seek(offset int64, whence int) (int64, error) {
+	return f.Reader.Seek(offset, whence)
+}
+func (f *testFile) Close() error { return nil }
+
+// JPEG 文件头（前 512 字节中应包含 FF D8 FF）
+var jpegHeader = append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, bytes.Repeat([]byte{0x00}, 508)...)
+
+// PNG 文件头
+var pngHeader = append([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, bytes.Repeat([]byte{0x00}, 504)...)
+
+// 非图片文件头
+var textHeader = []byte("this is not an image file")
+
+func makeUploadHeader(filename, contentType string, size int) *multipart.FileHeader {
+	return &multipart.FileHeader{
+		Filename: filename,
+		Header:   textproto.MIMEHeader{"Content-Type": {contentType}},
+		Size:     int64(size),
+	}
+}
+
+func TestUploadImage_Success(t *testing.T) {
+	svc := newTestService(
+		mockProductRepo{
+			createImageFunc: func(image *model.ProductImage) error {
+				image.ID = 1
+				return nil
+			},
+		},
+		mockCategoryRepo{},
+	)
+
+	t.Run("jpeg", func(t *testing.T) {
+		file := &testFile{bytes.NewReader(jpegHeader)}
+		header := makeUploadHeader("test.jpg", "image/jpeg", len(jpegHeader))
+		image, code, err := svc.UploadImage(1, file, header)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if code != errs.Success {
+			t.Fatalf("expected success, got %d", code)
+		}
+		if image.URL == "" {
+			t.Fatal("expected non-empty URL")
+		}
+	})
+
+	t.Run("png", func(t *testing.T) {
+		file := &testFile{bytes.NewReader(pngHeader)}
+		header := makeUploadHeader("test.png", "image/png", len(pngHeader))
+		image, code, err := svc.UploadImage(1, file, header)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if code != errs.Success {
+			t.Fatalf("expected success, got %d", code)
+		}
+		if image.URL == "" {
+			t.Fatal("expected non-empty URL")
+		}
+	})
+
+	t.Run("webp by extension fallback", func(t *testing.T) {
+		// Use small content that won't be detected as image; rely on extension fallback
+		data := []byte("RIFF\x00\x00\x00\x00WEBPVP8 ")
+		data = append(data, bytes.Repeat([]byte{0x00}, 500)...)
+		file := &testFile{bytes.NewReader(data)}
+		header := makeUploadHeader("test.webp", "application/octet-stream", len(data))
+		image, code, err := svc.UploadImage(1, file, header)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if code != errs.Success {
+			t.Fatalf("expected success, got %d", code)
+		}
+		if image.URL == "" {
+			t.Fatal("expected non-empty URL")
+		}
+	})
+}
+
+func TestUploadImage_InvalidContent(t *testing.T) {
+	svc := newTestService(mockProductRepo{}, mockCategoryRepo{})
+
+	t.Run("non-image content and non-image extension rejected", func(t *testing.T) {
+		file := &testFile{bytes.NewReader(textHeader)}
+		header := makeUploadHeader("readme.txt", "text/plain", len(textHeader))
+		_, code, err := svc.UploadImage(1, file, header)
+		if err != nil {
+			t.Fatal("unexpected error:", err)
+		}
+		if code != errs.ErrFileFormat {
+			t.Fatalf("expected ErrFileFormat (%d), got %d", errs.ErrFileFormat, code)
+		}
+	})
+}
+
+func TestUploadImage_FileTooLarge(t *testing.T) {
+	svc := newTestService(mockProductRepo{}, mockCategoryRepo{})
+	data := make([]byte, 6*1024*1024) // 6MB > 5MB limit
+	file := &testFile{bytes.NewReader(data)}
+	header := makeUploadHeader("large.jpg", "image/jpeg", len(data))
+	_, code, err := svc.UploadImage(1, file, header)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != errs.ErrFileTooLarge {
+		t.Fatalf("expected ErrFileTooLarge (%d), got %d", errs.ErrFileTooLarge, code)
+	}
+}

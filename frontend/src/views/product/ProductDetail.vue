@@ -34,7 +34,7 @@
       <n-descriptions label-placement="left" bordered style="margin-top: 24px">
         <n-descriptions-item label="价格">
           <n-text strong style="font-size: 24px; color: #f5222d">
-            ¥{{ (product.price / 100).toFixed(2) }}
+            {{ formatPrice(product.price) }}
           </n-text>
         </n-descriptions-item>
         <n-descriptions-item label="状态">
@@ -79,6 +79,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { productAPI } from '@/api/products'
+import { formatPrice } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 import type { ProductDetail } from '@/api/products'
 
