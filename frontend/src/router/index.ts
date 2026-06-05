@@ -52,6 +52,18 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/category/CategoryManagement.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'messages',
+        name: 'ConversationList',
+        component: () => import('@/views/chat/ConversationList.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'chat/:id',
+        name: 'ChatDetail',
+        component: () => import('@/views/chat/ChatDetail.vue'),
+        meta: { requiresAuth: true },
+      },
     ],
   },
   {

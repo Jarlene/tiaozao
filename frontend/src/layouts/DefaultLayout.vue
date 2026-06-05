@@ -20,6 +20,11 @@
               <n-button quaternary @click="$router.push('/categories')">
                 分类管理
               </n-button>
+              <n-badge :value="chatStore.totalUnread" :max="99">
+                <n-button quaternary @click="$router.push('/messages')">
+                  消息
+                </n-button>
+              </n-badge>
             </template>
           </n-space>
         </n-space>
@@ -57,12 +62,21 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { useChatStore } from '@/stores/chat'
 import { LogOutOutline, PersonOutline } from '@vicons/ionicons5'
 import { useRouter } from 'vue-router'
 
 const authStore = useAuthStore()
+const chatStore = useChatStore()
 const router = useRouter()
+
+onMounted(() => {
+  if (authStore.isAuthenticated) {
+    chatStore.fetchConversations()
+  }
+})
 
 function handleLogout() {
   authStore.logout()

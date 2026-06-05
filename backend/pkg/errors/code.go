@@ -27,14 +27,21 @@ const (
 
 	// 权限
 	ErrForbidden = 40301 // 无权限操作
+	ErrCannotReviewOwn = 40302 // 不能评价自己的商品
 
 	// 资源
 	ErrProductNotFound  = 40401
 	ErrImageNotFound    = 40402
 	ErrCategoryNotFound = 40403
+	ErrReviewNotFound   = 40404
 
 	// 服务端
 	ErrInternal = 50001
+	// 评论
+	ErrAlreadyReviewed  = 40009 // 已评价过该商品
+	ErrAlreadyReplied   = 40010 // 已回复过该评论
+	ErrReviewContentTooLong = 40011 // 评论内容超长
+	ErrInvalidRating    = 40012 // 评分无效
 )
 
 var MessageMap = map[int]string{
@@ -55,4 +62,10 @@ var MessageMap = map[int]string{
 	ErrCategoryHasChildren: "该分类下存在子分类，无法删除",
 	ErrCategoryHasProducts: "该分类下存在商品，无法删除",
 	ErrInternal:           "服务器内部错误",
+	ErrAlreadyReviewed:    "您已评价过该商品",
+	ErrAlreadyReplied:     "已回复过该评论",
+	ErrReviewContentTooLong: "评论内容超出长度限制（最多1000字）",
+	ErrInvalidRating:      "评分无效（1-5星）",
+	ErrCannotReviewOwn:    "不能评价自己的商品",
+	ErrReviewNotFound:     "评论不存在",
 }

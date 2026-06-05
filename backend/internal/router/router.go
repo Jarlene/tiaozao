@@ -1,6 +1,7 @@
 package router
 
 import (
+	"flea-market/internal/chat"
 	"flea-market/internal/config"
 	"flea-market/internal/handler"
 	"flea-market/internal/middleware"
@@ -9,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler *handler.ProductHandler, categoryHandler *handler.CategoryHandler, logger *zap.Logger) *gin.Engine {
+func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler *handler.ProductHandler, categoryHandler *handler.CategoryHandler, reviewHandler *handler.ReviewHandler, chatHandler *handler.ChatHandler, wsHandler *chat.WSHandler, logger *zap.Logger) *gin.Engine {
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -85,6 +86,41 @@ func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler 
 		protectedCategories.POST("", categoryHandler.Create)
 		protectedCategories.PUT("/:id", categoryHandler.Update)
 		protectedCategories.DELETE("/:id", categoryHandler.Delete)
+	}
+
+	// 评论路由（公开：列表和统计）
+	publicReviews := r.Group("/api/v1/products/:id/reviews")
+	{
+		publicReviews.GET("", reviewHandler.List)
+		publicReviews.GET("/stats", reviewHandler.GetStats)
+	}
+
+	// 评论路由（需要登录：发布和检查）
+	protectedReviews := r.Group("/api/v1/products/:id/reviews")
+	protectedReviews.Use(middleware.AuthMiddleware(&cfg.JWT))
+	{
+		protectedReviews.POST("", reviewHandler.Create)
+		protectedReviews.GET("/check", reviewHandler.CheckCanReview)
+	}
+
+	// 回复路由（需要登录）
+	protectedReplies := r.Group("/api/v1")
+	protectedReplies.Use(middleware.AuthMiddleware(&cfg.JWT))
+	{
+		protectedReplies.POST("/reviews/:reviewId/reply", reviewHandler.Reply)
+	}
+
+	// WebSocket 路由（通过 token 参数认证）
+	r.GET("/api/v1/ws", wsHandler.HandleWebSocket)
+
+	// 聊天路由（需要登录）
+	protectedChat := r.Group("/api/v1")
+	protectedChat.Use(middleware.AuthMiddleware(&cfg.JWT))
+	{
+		protectedChat.GET("/conversations", chatHandler.ListConversations)
+		protectedChat.POST("/conversations", chatHandler.CreateConversation)
+		protectedChat.GET("/conversations/:id/messages", chatHandler.GetMessages)
+		protectedChat.POST("/messages", chatHandler.SendMessage)
 	}
 
 	return r
