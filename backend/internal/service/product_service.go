@@ -357,12 +357,31 @@ func (s *ProductService) UpdateStatus(userID, productID uint, status model.Produ
 		return errors.ErrForbidden, nil
 	}
 
+	if !isValidStatusTransition(product.Status, status) {
+		return errors.ErrBadRequest, nil
+	}
+
 	product.Status = status
 	if err := s.productRepo.Update(product); err != nil {
 		return errors.ErrInternal, err
 	}
 
 	return errors.Success, nil
+}
+
+// isValidStatusTransition 校验状态转换的合法性
+// 允许的转换：active ↔ inactive, active → sold
+func isValidStatusTransition(current, target model.ProductStatus) bool {
+	switch current {
+	case model.ProductStatusActive:
+		return target == model.ProductStatusInactive || target == model.ProductStatusSold
+	case model.ProductStatusInactive:
+		return target == model.ProductStatusActive
+	case model.ProductStatusSold:
+		return false // 已售商品不可更改状态
+	default:
+		return false
+	}
 }
 
 // UploadImage 上传图片到 MinIO

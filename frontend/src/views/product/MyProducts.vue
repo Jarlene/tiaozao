@@ -87,6 +87,14 @@
                 下架
               </n-button>
               <n-button
+                v-if="product.status === 1"
+                size="tiny"
+                type="error"
+                @click="handleMarkSold(product.id)"
+              >
+                标记已售
+              </n-button>
+              <n-button
                 v-if="product.status === 0"
                 size="tiny"
                 type="success"
@@ -174,8 +182,12 @@ async function loadProducts() {
 
 async function loadCounts() {
   try {
-    const data = await productAPI.getCounts()
-    counts.value = data as { active: number; sold: number; inactive: number }
+    const data = (await productAPI.getCounts()) as Record<string, number>
+    counts.value = {
+      active: data.active ?? 0,
+      sold: data.sold ?? 0,
+      inactive: data.inactive ?? 0,
+    }
   } catch {
     // 静默失败
   }
@@ -207,6 +219,17 @@ async function handleActivate(id: number) {
   try {
     await productAPI.updateStatus(id, 1)
     message.success('已重新上架')
+    loadProducts()
+    loadCounts()
+  } catch {
+    message.error('操作失败')
+  }
+}
+
+async function handleMarkSold(id: number) {
+  try {
+    await productAPI.updateStatus(id, 2)
+    message.success('已标记为已售')
     loadProducts()
     loadCounts()
   } catch {

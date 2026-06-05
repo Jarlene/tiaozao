@@ -190,7 +190,9 @@ func (h *ProductHandler) ListMine(c *gin.Context) {
 	if s := c.Query("status"); s != "" {
 		if val, err := strconv.Atoi(s); err == nil {
 			st := model.ProductStatus(val)
-			status = &st
+			if st == model.ProductStatusInactive || st == model.ProductStatusActive || st == model.ProductStatusSold {
+				status = &st
+			}
 		}
 	}
 
@@ -237,6 +239,12 @@ func (h *ProductHandler) UpdateStatus(c *gin.Context) {
 		Status model.ProductStatus `json:"status" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, errors.ErrBadRequest)
+		return
+	}
+
+	// 校验状态值合法性
+	if req.Status != model.ProductStatusActive && req.Status != model.ProductStatusInactive && req.Status != model.ProductStatusSold {
 		Error(c, 400, errors.ErrBadRequest)
 		return
 	}
