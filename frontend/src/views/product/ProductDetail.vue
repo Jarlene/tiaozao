@@ -208,6 +208,7 @@
             <n-pagination
               :page="reviewPage"
               :page-count="reviewTotalPages"
+              :disabled="statsLoading"
               @update:page="handlePageChange"
             />
           </n-space>

@@ -104,13 +104,9 @@ func (h *ReviewHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	stats, code, err := h.reviewService.GetRatingStats(uint(productID))
+	stats, _, err := h.reviewService.GetRatingStats(uint(productID))
 	if err != nil {
 		Error(c, 500, errors.ErrInternal)
-		return
-	}
-	if code != errors.Success {
-		Error(c, 400, code)
 		return
 	}
 

@@ -54,7 +54,8 @@ func (r *reviewRepository) FindByID(id uint) (*model.Review, error) {
 
 func (r *reviewRepository) FindByProductAndUser(productID, userID uint) (*model.Review, error) {
 	var review model.Review
-	err := r.db.Where("product_id = ? AND user_id = ?", productID, userID).First(&review).Error
+	// 使用 Unscoped() 包含软删除记录，防止重复评价绕过软删除检查
+	err := r.db.Unscoped().Where("product_id = ? AND user_id = ?", productID, userID).First(&review).Error
 	if err != nil {
 		return nil, err
 	}

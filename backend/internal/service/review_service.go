@@ -139,6 +139,14 @@ func (s *ReviewService) CreateReview(userID, productID uint, req *CreateReviewRe
 
 // ListReviews 获取商品评论列表
 func (s *ReviewService) ListReviews(productID uint, page, pageSize int) (*PaginatedResult, int, error) {
+	// 校验商品存在
+	if _, err := s.productRepo.FindByID(productID); err != nil {
+		if stdErrors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.ErrProductNotFound, nil
+		}
+		return nil, errors.ErrInternal, err
+	}
+
 	if page < 1 {
 		page = 1
 	}
@@ -161,12 +169,20 @@ func (s *ReviewService) ListReviews(productID uint, page, pageSize int) (*Pagina
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: calcTotalPages(int(total), pageSize),
+		TotalPages: calcTotalPages(total, pageSize),
 	}, errors.Success, nil
 }
 
 // GetRatingStats 获取评分统计
 func (s *ReviewService) GetRatingStats(productID uint) (*RatingStats, int, error) {
+	// 校验商品存在
+	if _, err := s.productRepo.FindByID(productID); err != nil {
+		if stdErrors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.ErrProductNotFound, nil
+		}
+		return nil, errors.ErrInternal, err
+	}
+
 	repoStats, err := s.reviewRepo.GetRatingStats(productID)
 	if err != nil {
 		return nil, errors.ErrInternal, err

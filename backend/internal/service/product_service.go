@@ -269,7 +269,7 @@ func (s *ProductService) List(page, pageSize int) (*PaginatedResult, int, error)
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: calcTotalPages(int(total), pageSize),
+		TotalPages: calcTotalPages(total, pageSize),
 	}, errors.Success, nil
 }
 
@@ -297,7 +297,7 @@ func (s *ProductService) Search(keyword string, categoryID *uint, priceMin, pric
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: calcTotalPages(int(total), pageSize),
+		TotalPages: calcTotalPages(total, pageSize),
 	}, errors.Success, nil
 }
 
@@ -325,7 +325,7 @@ func (s *ProductService) ListMyProducts(userID uint, status *model.ProductStatus
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: calcTotalPages(int(total), pageSize),
+		TotalPages: calcTotalPages(total, pageSize),
 	}, errors.Success, nil
 }
 
@@ -549,12 +549,12 @@ func (s *ProductService) listItemFromModel(p *model.Product) ProductListItem {
 }
 
 // calcTotalPages 计算总页数
-func calcTotalPages(total, pageSize int) int {
+func calcTotalPages(total int64, pageSize int) int {
 	if total == 0 {
 		return 0
 	}
-	pages := total / pageSize
-	if total%pageSize > 0 {
+	pages := int(total) / pageSize
+	if int(total)%pageSize > 0 {
 		pages++
 	}
 	return pages

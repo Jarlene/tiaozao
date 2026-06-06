@@ -308,11 +308,11 @@ Each issue carries a small KV `metadata` bag — a high-signal scratchpad where 
 
 **This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.
 
-1. Run `multica issue get 54cb238f-2e50-4291-9e76-fc430dc3905e --output json` to understand the issue context
-2. Run `multica issue metadata list 54cb238f-2e50-4291-9e76-fc430dc3905e --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.
-3. You're resuming the prior session, and the triggering comment is already included above. No other new comments on this issue since your last run. Use the active thread anchor `0c65f44f-55cd-41b7-8109-92fac19dcaef` and triggering comment ID `7c3518ad-1e4c-4c4a-bfde-484bda9ea2ed`. If your reply depends on thread context, do not rely only on resumed session memory — first pull the triggering conversation with: `multica issue comment list 54cb238f-2e50-4291-9e76-fc430dc3905e --thread 0c65f44f-55cd-41b7-8109-92fac19dcaef --tail 30 --output json`.
+1. Run `multica issue get 3212932d-9e94-4620-b826-e32cc94399d3 --output json` to understand the issue context
+2. Run `multica issue metadata list 3212932d-9e94-4620-b826-e32cc94399d3 --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.
+3. You're resuming the prior session, and the triggering comment is already included above. No other new comments on this issue since your last run. Use the active thread anchor `373a0cce-f5d5-4b5b-9557-258059e854e8` and triggering comment ID `834b69f5-a6e1-497b-a275-db7b38658241`. If your reply depends on thread context, do not rely only on resumed session memory — first pull the triggering conversation with: `multica issue comment list 3212932d-9e94-4620-b826-e32cc94399d3 --thread 373a0cce-f5d5-4b5b-9557-258059e854e8 --tail 30 --output json`.
 
-4. Find the triggering comment (ID: `7c3518ad-1e4c-4c4a-bfde-484bda9ea2ed`) and understand what is being asked — do NOT confuse it with previous comments
+4. Find the triggering comment (ID: `834b69f5-a6e1-497b-a275-db7b38658241`) and understand what is being asked — do NOT confuse it with previous comments
 5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.
 6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.
 7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. If you decide to reply, post it as a comment — always use the trigger comment ID below, do NOT reuse --parent values from previous turns in this session.
@@ -321,7 +321,7 @@ Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, e
 
 Use this form, preserving the same issue ID and --parent value:
 
-    cat <<'COMMENT' | multica issue comment add 54cb238f-2e50-4291-9e76-fc430dc3905e --parent 7c3518ad-1e4c-4c4a-bfde-484bda9ea2ed --content-stdin
+    cat <<'COMMENT' | multica issue comment add 3212932d-9e94-4620-b826-e32cc94399d3 --parent 834b69f5-a6e1-497b-a275-db7b38658241 --content-stdin
     First paragraph.
 
     Second paragraph.
