@@ -228,17 +228,14 @@ func (s *ReviewService) ReplyReview(userID, reviewID uint, req *ReplyReviewReq) 
 		return nil, errors.ErrForbidden, nil
 	}
 
-	// 检查是否已回复过
-	if review.ReplyContent != "" {
-		return nil, errors.ErrAlreadyReplied, nil
-	}
-
+	// 原子回复：在数据库层面检查并更新，防止竞态条件
 	now := time.Now()
-	review.ReplyContent = html.EscapeString(req.Content)
-	review.RepliedAt = &now
-
-	if err := s.reviewRepo.Update(review); err != nil {
+	ok, err := s.reviewRepo.ReplyToReview(reviewID, html.EscapeString(req.Content), now)
+	if err != nil {
 		return nil, errors.ErrInternal, err
+	}
+	if !ok {
+		return nil, errors.ErrAlreadyReplied, nil
 	}
 
 	updated, err := s.reviewRepo.FindByID(reviewID)

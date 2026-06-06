@@ -89,7 +89,11 @@ func (h *ReviewHandler) List(c *gin.Context) {
 		return
 	}
 	if code != errors.Success {
-		Error(c, 400, code)
+		httpStatus := 400
+		if code == errors.ErrProductNotFound || code == errors.ErrReviewNotFound {
+			httpStatus = 404
+		}
+		Error(c, httpStatus, code)
 		return
 	}
 
@@ -104,9 +108,17 @@ func (h *ReviewHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	stats, _, err := h.reviewService.GetRatingStats(uint(productID))
+	stats, code, err := h.reviewService.GetRatingStats(uint(productID))
 	if err != nil {
 		Error(c, 500, errors.ErrInternal)
+		return
+	}
+	if code != errors.Success {
+		httpStatus := 400
+		if code == errors.ErrProductNotFound || code == errors.ErrReviewNotFound {
+			httpStatus = 404
+		}
+		Error(c, httpStatus, code)
 		return
 	}
 

@@ -168,7 +168,7 @@
                 </n-card>
 
                 <!-- 卖家回复入口 -->
-                <template v-if="isOwner && !review.reply_content && !replyingTo">
+                <template v-if="isOwner && !review.reply_content && replyingTo !== review.id">
                   <n-button size="tiny" quaternary type="primary" @click="startReply(review.id)">
                     回复
                   </n-button>

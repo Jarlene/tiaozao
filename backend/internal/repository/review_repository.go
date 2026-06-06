@@ -2,6 +2,7 @@ package repository
 
 import (
 	stdErrors "errors"
+	"time"
 
 	"flea-market/internal/model"
 
@@ -15,6 +16,7 @@ type ReviewRepository interface {
 	ListByProduct(productID uint, page, pageSize int) ([]model.Review, int64, error)
 	GetRatingStats(productID uint) (*RatingStats, error)
 	Update(review *model.Review) error
+	ReplyToReview(reviewID uint, content string, repliedAt time.Time) (bool, error)
 }
 
 type RatingStats struct {
@@ -130,4 +132,17 @@ func (r *reviewRepository) GetRatingStats(productID uint) (*RatingStats, error) 
 
 func (r *reviewRepository) Update(review *model.Review) error {
 	return r.db.Save(review).Error
+}
+
+func (r *reviewRepository) ReplyToReview(reviewID uint, content string, repliedAt time.Time) (bool, error) {
+	result := r.db.Model(&model.Review{}).
+		Where("id = ? AND reply_content = ''", reviewID).
+		Updates(map[string]interface{}{
+			"reply_content": content,
+			"replied_at":    repliedAt,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
