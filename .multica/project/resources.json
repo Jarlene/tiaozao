@@ -1,0 +1,15 @@
+{
+  "project_id": "ef137be6-7b27-4c19-acf9-664af98f8359",
+  "project_title": "跳蚤市场",
+  "resources": [
+    {
+      "id": "3ff5b6d8-c63c-4104-90c3-433806093bd6",
+      "resource_type": "local_directory",
+      "resource_ref": {
+        "label": "flea",
+        "daemon_id": "019e4ae2-ad6f-7bbf-b7a5-f0ac48d6f9c8",
+        "local_path": "/Users/jarlen/Code/Soft/Game/flea"
+      }
+    }
+  ]
+}

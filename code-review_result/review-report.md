@@ -1,0 +1,137 @@
+# Code Review Report: Phase 1
+
+**Project**: flea-market (跳蚤市场)
+**Scope**: Backend (Go/Gin/GORM) + Frontend (Vue 3/Vite/Naive UI)
+**Files Scanned**: 22
+**Defects Found**: 5 (1 High, 2 Medium, 2 Low)
+
+---
+
+## Executive Summary
+
+The Phase 1 implementation is structurally sound with clean layered architecture and proper separation of concerns. The code follows Go and Vue 3 best practices. Five defects were identified: one security misconfiguration (CORS) that would block frontend integration, two logic bugs (config loading order, race condition), and two minor code quality issues.
+
+**Overall Code Quality Rating**: 7.5/10
+
+---
+
+## Defect Details
+
+### D002 [HIGH] Insecure CORS configuration
+
+**File**: `backend/internal/middleware/cors.go:9-13`
+**Type**: Security Vulnerability
+
+**Issue**: `Access-Control-Allow-Origin: *` is combined with `Access-Control-Allow-Credentials: true`. This violates the CORS specification - browsers will either reject credentialed requests or accept them from any origin.
+
+**Impact**: Frontend cannot make credentialed API calls. Blocking integration test.
+
+**Fix**: Replace wildcard with explicit allowed origins:
+```go
+origin := c.Request.Header.Get("Origin")
+allowedOrigins := map[string]bool{"http://localhost:5173": true}
+if allowedOrigins[origin] {
+    c.Header("Access-Control-Allow-Origin", origin)
+}
+```
+
+---
+
+### D001 [MEDIUM] Check-then-act race condition in Register
+
+**File**: `backend/internal/service/auth_service.go:65-88`
+**Type**: Logical Defect
+
+**Issue**: The Register flow has a TOCTOU race condition: FindByEmail check (line 65) then Create (line 86). Under concurrent requests, both pass the check, one fails with unique constraint violation, but the error handler returns 500 instead of 409.
+
+**Fix**: Detect PostgreSQL unique_violation (code 23505) and return ErrEmailExists:
+```go
+if err := s.userRepo.Create(user); err != nil {
+    if isPGUniqueViolation(err) {
+        return nil, nil, errors.ErrEmailExists, nil
+    }
+    return nil, nil, errors.ErrInternal, err
+}
+```
+
+---
+
+### D003 [MEDIUM] Config loaded before .env file parsing
+
+**File**: `backend/cmd/server/main.go:25,72-74`
+**Type**: Logical Defect
+
+**Issue**: `config.Load()` executes at line 25, but `loadEnvFile(os.Args[1])` runs at line 73. The `.env` file has no effect on configuration.
+
+**Fix**: Load env file before config:
+```go
+if len(os.Args) > 1 { loadEnvFile(os.Args[1]) }
+cfg := config.Load()
+```
+
+---
+
+### D004 [LOW] log.Printf mixed with structured zap logger
+
+**File**: `backend/cmd/server/main.go:85`
+**Type**: Static Defect
+
+**Issue**: Uses `log.Printf` instead of the structured logger.
+
+**Fix**: `logger.Warn("Could not read env file", zap.String("path", path), zap.Error(err))`
+
+---
+
+### D005 [LOW] Inefficient regexp.MustCompile in hot path
+
+**File**: `backend/internal/service/auth_service.go:256-258`
+**Type**: Static Defect
+
+**Issue**: `regexp.MustCompile` called on every `isValidPassword` invocation. Should compile once.
+
+**Fix**: Hoist to package level:
+```go
+var (
+    reUpper = regexp.MustCompile(`[A-Z]`)
+    reLower = regexp.MustCompile(`[a-z]`)
+    reDigit = regexp.MustCompile(`[0-9]`)
+)
+```
+
+---
+
+## Files Reviewed Without Issues (17 files)
+
+- `backend/internal/config/config.go` - Clean env-based config loading
+- `backend/internal/handler/auth_handler.go` - Proper request validation and error mapping
+- `backend/internal/handler/response.go` - Simple, correct response format
+- `backend/internal/middleware/auth.go` - Sound JWT validation (v5 blocks alg:none by default)
+- `backend/internal/middleware/logger.go` - Standard zap middleware pattern
+- `backend/internal/model/user.go` - Correct GORM model
+- `backend/internal/repository/user_repository.go` - Standard CRUD with interfaces
+- `backend/internal/router/router.go` - Proper route grouping and middleware scoping
+- `backend/internal/storage/minio.go` - Correct client init with bucket creation
+- `backend/pkg/errors/code.go` - Clean error code design
+- `frontend/src/api/auth.ts` - Proper API typing
+- `frontend/src/api/client.ts` - Correct Axios interceptor pattern (token refresh queue)
+- `frontend/src/stores/auth.ts` - Clean Pinia store with proper token persistence
+- `frontend/src/router/index.ts` - Correct navigation guard logic
+- `frontend/src/views/Login.vue` - Proper form validation
+- `frontend/src/views/Register.vue` - Proper form validation with password confirmation
+- `frontend/src/views/Profile.vue` - Correct profile CRUD pattern
+
+---
+
+## Recommendations by Priority
+
+| Priority | Action | File | Effort |
+|----------|--------|------|--------|
+| P0 | Fix CORS configuration | `middleware/cors.go` | 5 min |
+| P1 | Fix config loading order | `cmd/server/main.go` | 5 min |
+| P2 | Handle unique constraint in Register | `service/auth_service.go` | 10 min |
+| P3 | Hoist regexp to package level | `service/auth_service.go` | 2 min |
+| P4 | Replace log.Printf with logger | `cmd/server/main.go` | 1 min |
+
+---
+
+*Generated by review skill • 2026-06-04*

@@ -1,35 +1,93 @@
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: flea-postgres
     environment:
-      POSTGRES_USER: tiaozao
-      POSTGRES_PASSWORD: tiaozao123
-      POSTGRES_DB: tiaozao
+      POSTGRES_DB: flea_market
+      POSTGRES_USER: flea
+      POSTGRES_PASSWORD: flea_pass
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tiaozao"]
+      test: ["CMD-SHELL", "pg_isready -U flea -d flea_market"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - flea-network
 
-  app:
-    build: .
+  redis:
+    image: redis:7-alpine
+    container_name: flea-redis
     ports:
-      - "8080:8080"
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flea-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: flea-minio
+    environment:
+      MINIO_ROOT_USER: flea_admin
+      MINIO_ROOT_PASSWORD: flea_admin_pass
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flea-network
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flea-api
     environment:
       SERVER_PORT: "8080"
-      DATABASE_URL: "postgres://tiaozao:tiaozao123@postgres:5432/tiaozao?sslmode=disable"
-      IMAGE_DIR: /app/uploads
-      IMAGE_BASE_URL: http://localhost:8080/uploads
-    volumes:
-      - uploads:/app/uploads
+      SERVER_MODE: release
+      DATABASE_DSN: "host=postgres user=flea password=flea_pass dbname=flea_market port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+      REDIS_ADDR: "redis:6379"
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
+      JWT_SECRET: "flea-market-jwt-secret-key-change-in-production-32chars"
+      ACCESS_TOKEN_TTL: 15m
+      REFRESH_TOKEN_TTL: 168h
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "flea_admin"
+      MINIO_SECRET_KEY: "flea_admin_pass"
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET: "flea-avatars"
+    ports:
+      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - flea-network
 
 volumes:
-  pgdata:
-  uploads:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  flea-network:
+    driver: bridge
