@@ -12,8 +12,17 @@
     </template>
 
     <!-- 消息列表 -->
-    <div ref="messageListRef" class="message-list" style="flex: 1; overflow-y: auto; padding: 12px 0">
+    <div ref="messageListRef" class="message-list" style="flex: 1; overflow-y: auto; padding: 12px 0" @scroll="handleScroll">
       <n-space vertical :size="12">
+        <!-- 加载更多指示器 -->
+        <div v-if="chatStore.hasMore && chatStore.messages.length > 0" style="text-align: center; padding: 8px">
+          <n-button v-if="!chatStore.loadingMore" text size="small" @click="loadMore">加载更多</n-button>
+          <n-spin v-else size="small" />
+        </div>
+        <div v-else-if="chatStore.messages.length > 0" style="text-align: center; padding: 8px">
+          <n-text depth="3" style="font-size: 12px">没有更多消息</n-text>
+        </div>
+
         <div v-for="msg in chatStore.messages" :key="msg.id" style="display: flex; justify-content: center">
           <!-- 系统消息 -->
           <n-tag v-if="msg.msg_type === 3" size="tiny">{{ msg.content }}</n-tag>
@@ -89,6 +98,7 @@ const chatStore = useChatStore()
 const authStore = useAuthStore()
 const messageListRef = ref<HTMLElement | null>(null)
 const inputText = ref('')
+const initialScrollDone = ref(false)
 let typingTimer: ReturnType<typeof setTimeout> | null = null
 
 const conversationId = computed(() => Number(route.params.id))
@@ -137,6 +147,31 @@ function scrollToBottom() {
   })
 }
 
+function handleScroll() {
+  const el = messageListRef.value
+  if (!el || chatStore.loadingMore) return
+  // 滚动到顶部时加载更多
+  if (el.scrollTop <= 30) {
+    loadMore()
+  }
+}
+
+async function loadMore() {
+  if (!chatStore.hasMore || chatStore.loadingMore || chatStore.messages.length === 0) return
+
+  const el = messageListRef.value
+  const prevHeight = el?.scrollHeight || 0
+
+  await chatStore.loadMoreMessages(conversationId.value)
+
+  // 保持滚动位置（加载历史消息后画面不动）
+  if (el) {
+    nextTick(() => {
+      el.scrollTop = el.scrollHeight - prevHeight
+    })
+  }
+}
+
 function handleSend() {
   const text = inputText.value.trim()
   if (!text) return
@@ -158,6 +193,7 @@ function goBack() {
 
 watch(conversationId, (newId) => {
   if (newId) {
+    initialScrollDone.value = false
     loadConversation()
   }
 })
@@ -175,9 +211,15 @@ async function loadConversation() {
   if (conv) {
     chatStore.currentConversation = conv
     await chatStore.fetchMessages(conversationId.value)
+    // 通过 REST API 标记已读（同时更新未读计数）
+    await chatStore.markConversationRead(conversationId.value)
+    // 连接 WebSocket 并发送已读回执
     chatStore.connectWebSocket(conversationId.value)
     chatStore.sendReadReceipt(conversationId.value)
-    scrollToBottom()
+    nextTick(() => {
+      scrollToBottom()
+      initialScrollDone.value = true
+    })
   }
 }
 

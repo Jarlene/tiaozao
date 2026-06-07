@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler *handler.ProductHandler, categoryHandler *handler.CategoryHandler, reviewHandler *handler.ReviewHandler, chatHandler *handler.ChatHandler, wsHandler *chat.WSHandler, logger *zap.Logger) *gin.Engine {
+func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler *handler.ProductHandler, categoryHandler *handler.CategoryHandler, reviewHandler *handler.ReviewHandler, chatHandler *handler.ChatHandler, wsHandler *chat.WSHandler, orderHandler *handler.OrderHandler, logger *zap.Logger) *gin.Engine {
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -120,7 +120,28 @@ func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler 
 		protectedChat.GET("/conversations", chatHandler.ListConversations)
 		protectedChat.POST("/conversations", chatHandler.CreateConversation)
 		protectedChat.GET("/conversations/:id/messages", chatHandler.GetMessages)
+		protectedChat.POST("/conversations/:id/read", chatHandler.MarkRead)
 		protectedChat.POST("/messages", chatHandler.SendMessage)
+	}
+
+	// 订单路由（需要登录）
+	protectedOrders := r.Group("/api/v1/orders")
+	protectedOrders.Use(middleware.AuthMiddleware(&cfg.JWT))
+	{
+		// 注意：/mine 和 /sold 必须在 /:id 之前注册
+		protectedOrders.GET("/mine", orderHandler.ListMine)
+		protectedOrders.GET("/sold", orderHandler.ListSold)
+		protectedOrders.POST("", orderHandler.Create)
+		protectedOrders.GET("/:id", orderHandler.GetByID)
+		protectedOrders.POST("/:id/cancel", orderHandler.Cancel)
+		protectedOrders.POST("/:id/pay", orderHandler.Pay)
+		protectedOrders.POST("/:id/ship", orderHandler.Ship)
+		protectedOrders.POST("/:id/confirm", orderHandler.ConfirmReceive)
+		protectedOrders.POST("/:id/refund", orderHandler.RequestRefund)
+		protectedOrders.POST("/:id/refund/complete", orderHandler.CompleteRefund)
+		protectedOrders.POST("/:id/dispute", orderHandler.RaiseDispute)
+		protectedOrders.POST("/:id/arbitrate", orderHandler.Arbitrate)
+		protectedOrders.GET("/:id/logs", orderHandler.GetStatusLogs)
 	}
 
 	return r

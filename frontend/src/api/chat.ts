@@ -46,11 +46,16 @@ export const chatAPI = {
     return res.data.data
   },
 
-  async getMessages(conversationId: number, page = 1, pageSize = 20) {
-    const res = await client.get<ApiResponse<{ messages: Message[]; total: number; page: number; page_size: number }>>(
+  async getMessages(conversationId: number, cursor = 0, limit = 20) {
+    const res = await client.get<ApiResponse<{ messages: Message[]; has_more: boolean }>>(
       `/conversations/${conversationId}/messages`,
-      { params: { page, page_size: pageSize } }
+      { params: { cursor, limit } }
     )
+    return res.data.data
+  },
+
+  async markConversationRead(conversationId: number) {
+    const res = await client.post<ApiResponse<{ status: string }>>(`/conversations/${conversationId}/read`)
     return res.data.data
   },
 

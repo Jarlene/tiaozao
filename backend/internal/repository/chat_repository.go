@@ -83,7 +83,9 @@ type MessageRepository interface {
 	Create(msg *model.Message) error
 	FindByID(id uint) (*model.Message, error)
 	ListByConversation(convID uint, limit, offset int) ([]model.Message, error)
+	ListByConversationCursor(convID uint, cursorID uint, limit int) ([]model.Message, error)
 	BatchUpdateStatus(convID uint, senderID uint, status int) error
+	BatchUpdateStatusAll(convID uint, userID uint, status int) error
 	GetLastMessage(convID uint) (*model.Message, error)
 }
 
@@ -118,9 +120,28 @@ func (r *messageRepository) ListByConversation(convID uint, limit, offset int) (
 	return msgs, nil
 }
 
+func (r *messageRepository) ListByConversationCursor(convID uint, cursorID uint, limit int) ([]model.Message, error) {
+	var msgs []model.Message
+	query := r.db.Where("conversation_id = ?", convID)
+	if cursorID > 0 {
+		query = query.Where("id < ?", cursorID)
+	}
+	err := query.Order("id DESC").Limit(limit).Find(&msgs).Error
+	if err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
 func (r *messageRepository) BatchUpdateStatus(convID uint, senderID uint, status int) error {
 	return r.db.Model(&model.Message{}).
 		Where("conversation_id = ? AND sender_id != ? AND status < ?", convID, senderID, status).
+		UpdateColumn("status", status).Error
+}
+
+func (r *messageRepository) BatchUpdateStatusAll(convID uint, userID uint, status int) error {
+	return r.db.Model(&model.Message{}).
+		Where("conversation_id = ? AND sender_id != ? AND status < ?", convID, userID, status).
 		UpdateColumn("status", status).Error
 }
 

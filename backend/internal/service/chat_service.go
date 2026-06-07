@@ -7,12 +7,14 @@ import (
 )
 
 type ChatService struct {
-	convRepo repository.ConversationRepository
-	msgRepo  repository.MessageRepository
+	convRepo    repository.ConversationRepository
+	msgRepo     repository.MessageRepository
+	userRepo    repository.UserRepository
+	productRepo repository.ProductRepository
 }
 
-func NewChatService(convRepo repository.ConversationRepository, msgRepo repository.MessageRepository) *ChatService {
-	return &ChatService{convRepo: convRepo, msgRepo: msgRepo}
+func NewChatService(convRepo repository.ConversationRepository, msgRepo repository.MessageRepository, userRepo repository.UserRepository, productRepo repository.ProductRepository) *ChatService {
+	return &ChatService{convRepo: convRepo, msgRepo: msgRepo, userRepo: userRepo, productRepo: productRepo}
 }
 
 // CreateConversationReq 创建会话请求
@@ -22,18 +24,29 @@ type CreateConversationReq struct {
 	SellerID  uint `json:"seller_id" binding:"required"`
 }
 
+// ProductSimpleInfo 商品简要信息
+type ProductSimpleInfo struct {
+	ID       uint   `json:"id"`
+	Title    string `json:"title"`
+	Price    int64  `json:"price"`
+	ImageURL string `json:"image_url"`
+}
+
 // ConversationResp 会话响应
 type ConversationResp struct {
-	ID           uint   `json:"id"`
-	ProductID    uint   `json:"product_id"`
-	BuyerID      uint   `json:"buyer_id"`
-	SellerID     uint   `json:"seller_id"`
-	LastMsg      string `json:"last_msg"`
-	LastMsgID    uint   `json:"last_msg_id"`
-	UnreadBuyer  int    `json:"unread_buyer"`
-	UnreadSeller int    `json:"unread_seller"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID           uint               `json:"id"`
+	ProductID    uint               `json:"product_id"`
+	BuyerID      uint               `json:"buyer_id"`
+	SellerID     uint               `json:"seller_id"`
+	LastMsg      string             `json:"last_msg"`
+	LastMsgID    uint               `json:"last_msg_id"`
+	UnreadBuyer  int                `json:"unread_buyer"`
+	UnreadSeller int                `json:"unread_seller"`
+	CreatedAt    string             `json:"created_at"`
+	UpdatedAt    string             `json:"updated_at"`
+	Buyer        *UserSimpleProfile `json:"buyer,omitempty"`
+	Seller       *UserSimpleProfile `json:"seller,omitempty"`
+	Product      *ProductSimpleInfo `json:"product,omitempty"`
 }
 
 // MessageResp 消息响应
@@ -70,6 +83,43 @@ func toConversationResp(conv *model.Conversation) *ConversationResp {
 	}
 }
 
+func (s *ChatService) enrichConversation(conv *ConversationResp) {
+	// 补充买家、卖家信息
+	if buyer, err := s.userRepo.FindByID(conv.BuyerID); err == nil {
+		conv.Buyer = &UserSimpleProfile{
+			ID:        buyer.ID,
+			Nickname:  buyer.Nickname,
+			AvatarURL: buyer.AvatarURL,
+		}
+	}
+	if seller, err := s.userRepo.FindByID(conv.SellerID); err == nil {
+		conv.Seller = &UserSimpleProfile{
+			ID:        seller.ID,
+			Nickname:  seller.Nickname,
+			AvatarURL: seller.AvatarURL,
+		}
+	}
+
+	// 补充商品信息
+	if product, err := s.productRepo.FindByID(conv.ProductID); err == nil {
+		info := &ProductSimpleInfo{
+			ID:    product.ID,
+			Title: product.Title,
+			Price: product.Price,
+		}
+		if len(product.Images) > 0 {
+			info.ImageURL = product.Images[0].URL
+		}
+		conv.Product = info
+	}
+}
+
+func (s *ChatService) enrichConversations(convs []*ConversationResp) {
+	for _, conv := range convs {
+		s.enrichConversation(conv)
+	}
+}
+
 func toMessageResp(msg *model.Message) *MessageResp {
 	return &MessageResp{
 		ID:             msg.ID,
@@ -86,7 +136,9 @@ func toMessageResp(msg *model.Message) *MessageResp {
 func (s *ChatService) CreateConversation(req *CreateConversationReq) (*ConversationResp, int, error) {
 	existing, err := s.convRepo.FindByProductAndBuyer(req.ProductID, req.BuyerID)
 	if err == nil && existing != nil {
-		return toConversationResp(existing), errors.Success, nil
+		resp := toConversationResp(existing)
+		s.enrichConversation(resp)
+		return resp, errors.Success, nil
 	}
 
 	conv := &model.Conversation{
@@ -99,7 +151,9 @@ func (s *ChatService) CreateConversation(req *CreateConversationReq) (*Conversat
 	if err := s.convRepo.Create(conv); err != nil {
 		return nil, errors.ErrInternal, err
 	}
-	return toConversationResp(conv), errors.Success, nil
+	resp := toConversationResp(conv)
+	s.enrichConversation(resp)
+	return resp, errors.Success, nil
 }
 
 // ListConversations 获取用户的会话列表
@@ -112,30 +166,33 @@ func (s *ChatService) ListConversations(userID uint) ([]*ConversationResp, int, 
 	for i, conv := range convs {
 		resp[i] = toConversationResp(&conv)
 	}
+	s.enrichConversations(resp)
 	return resp, errors.Success, nil
 }
 
-// GetMessages 获取消息历史（分页）
-func (s *ChatService) GetMessages(convID, userID uint, page, pageSize int) ([]*MessageResp, int, int, error) {
+// GetMessages 获取消息历史（游标分页）
+// cursorID=0 时获取最新消息，否则获取比 cursorID 更早的消息
+func (s *ChatService) GetMessages(convID, userID uint, cursorID uint, limit int) ([]*MessageResp, bool, int, error) {
 	conv, err := s.convRepo.FindByID(convID)
 	if err != nil {
-		return nil, 0, errors.ErrForbidden, nil
+		return nil, false, errors.ErrForbidden, nil
 	}
 	if conv.BuyerID != userID && conv.SellerID != userID {
-		return nil, 0, errors.ErrForbidden, nil
+		return nil, false, errors.ErrForbidden, nil
 	}
 
-	if pageSize <= 0 || pageSize > 100 {
-		pageSize = 20
+	if limit <= 0 || limit > 100 {
+		limit = 20
 	}
-	if page <= 0 {
-		page = 1
-	}
-	offset := (page - 1) * pageSize
 
-	msgs, err := s.msgRepo.ListByConversation(convID, pageSize, offset)
+	msgs, err := s.msgRepo.ListByConversationCursor(convID, cursorID, limit+1)
 	if err != nil {
-		return nil, 0, errors.ErrInternal, err
+		return nil, false, errors.ErrInternal, err
+	}
+
+	hasMore := len(msgs) > limit
+	if hasMore {
+		msgs = msgs[:limit]
 	}
 
 	resp := make([]*MessageResp, len(msgs))
@@ -144,11 +201,34 @@ func (s *ChatService) GetMessages(convID, userID uint, page, pageSize int) ([]*M
 	}
 
 	// 标记为己读
-	isBuyer := conv.BuyerID == userID
-	_ = s.msgRepo.BatchUpdateStatus(convID, userID, 3) // 3=read
-	_ = s.convRepo.ResetUnread(convID, isBuyer)
+	if cursorID == 0 {
+		isBuyer := conv.BuyerID == userID
+		_ = s.msgRepo.BatchUpdateStatusAll(convID, userID, 3) // 3=read
+		_ = s.convRepo.ResetUnread(convID, isBuyer)
+	}
 
-	return resp, len(msgs), errors.Success, nil
+	return resp, hasMore, errors.Success, nil
+}
+
+// MarkConversationRead 标记会话已读
+func (s *ChatService) MarkConversationRead(convID, userID uint) (int, error) {
+	conv, err := s.convRepo.FindByID(convID)
+	if err != nil {
+		return errors.ErrForbidden, nil
+	}
+	if conv.BuyerID != userID && conv.SellerID != userID {
+		return errors.ErrForbidden, nil
+	}
+
+	isBuyer := conv.BuyerID == userID
+	if err := s.msgRepo.BatchUpdateStatusAll(convID, userID, 3); err != nil {
+		return errors.ErrInternal, err
+	}
+	if err := s.convRepo.ResetUnread(convID, isBuyer); err != nil {
+		return errors.ErrInternal, err
+	}
+
+	return errors.Success, nil
 }
 
 // SendMessage 保存消息

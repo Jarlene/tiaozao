@@ -1,0 +1,86 @@
+{
+  "report_version": "1.0",
+  "review_scope": {
+    "scan_mode": "directory",
+    "scan_target": "flea-market project Phase 1 (backend/ + frontend/)",
+    "files_scanned": 22,
+    "files_with_defects": 3
+  },
+  "project_environment": {
+    "languages": ["Go", "TypeScript", "Vue 3"],
+    "frameworks": ["Gin", "GORM", "Vue 3", "Naive UI"],
+    "api_framework": "Gin (REST)",
+    "authentication": "JWT (Access Token + Refresh Token)",
+    "database": "PostgreSQL via GORM ORM"
+  },
+  "summary": {
+    "total_defects": 5,
+    "by_severity": {
+      "high": 1,
+      "medium": 2,
+      "low": 2
+    },
+    "by_type": {
+      "security_vulnerability": 1,
+      "logical_defect": 2,
+      "static_defect": 2
+    }
+  },
+  "defects": [
+    {
+      "id": "D002",
+      "severity": "high",
+      "type": "security_vulnerability",
+      "title": "Insecure CORS configuration: wildcard origin with credentials enabled",
+      "file": "backend/internal/middleware/cors.go",
+      "location": "backend/internal/middleware/cors.go:9-13",
+      "description": "CORS sets Access-Control-Allow-Origin: * with Access-Control-Allow-Credentials: true, which violates CORS spec. Browsers reject credentialed requests with wildcard origins, breaking frontend integration. Also allows arbitrary origins to make credentialed requests.",
+      "recommendation": "Replace wildcard origin with explicit allowed origin list (e.g., http://localhost:5173 for dev).",
+      "fix_file": "backend/internal/middleware/cors.go"
+    },
+    {
+      "id": "D001",
+      "severity": "medium",
+      "type": "logical_defect",
+      "title": "Check-then-act race condition in Register with wrong error handling",
+      "file": "backend/internal/service/auth_service.go",
+      "location": "backend/internal/service/auth_service.go:65-88",
+      "description": "Concurrent registrations with same email: both requests pass FindByEmail check, first Create succeeds, second fails with unique constraint but returns 500 instead of detecting the constraint violation and returning 409.",
+      "recommendation": "Handle PostgreSQL unique_violation error code and return ErrEmailExists (409) appropriately.",
+      "fix_file": "backend/internal/service/auth_service.go"
+    },
+    {
+      "id": "D003",
+      "severity": "medium",
+      "type": "logical_defect",
+      "title": "Config loaded before .env file parsing",
+      "file": "backend/cmd/server/main.go",
+      "location": "backend/cmd/server/main.go:25,72-74",
+      "description": "config.Load() at line 25 runs before loadEnvFile at line 73. The .env file specified as CLI argument has no effect on config since it is loaded after config is already resolved.",
+      "recommendation": "Move loadEnvFile(os.Args[1]) before config.Load() call.",
+      "fix_file": "backend/cmd/server/main.go"
+    },
+    {
+      "id": "D004",
+      "severity": "low",
+      "type": "static_defect",
+      "title": "log.Printf mixed with structured zap logger",
+      "file": "backend/cmd/server/main.go",
+      "location": "backend/cmd/server/main.go:85",
+      "description": "Uses log.Printf for warning message while rest of application uses structured zap.Logger.",
+      "recommendation": "Replace log.Printf with logger.Warn.",
+      "fix_file": "backend/cmd/server/main.go"
+    },
+    {
+      "id": "D005",
+      "severity": "low",
+      "type": "static_defect",
+      "title": "Inefficient regexp.MustCompile called on every function invocation",
+      "file": "backend/internal/service/auth_service.go",
+      "location": "backend/internal/service/auth_service.go:256-258",
+      "description": "regexp.MustCompile is called on every invocation of isValidPassword and extractNickname, causing unnecessary CPU overhead.",
+      "recommendation": "Hoist regexp.MustCompile calls to package-level variables.",
+      "fix_file": "backend/internal/service/auth_service.go"
+    }
+  ]
+}

@@ -153,6 +153,9 @@ func (h *WSHandler) handleTyping(client *Client, wsMsg WSMessage) {
 }
 
 func (h *WSHandler) handleReadReceipt(client *Client, wsMsg WSMessage) {
+	// 持久化已读状态
+	_, _ = h.chatService.MarkConversationRead(wsMsg.ConversationID, client.UserID)
+
 	readMsg := WSMessage{
 		Type:           MsgRead,
 		ConversationID: wsMsg.ConversationID,

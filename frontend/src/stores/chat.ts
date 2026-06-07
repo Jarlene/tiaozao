@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { chatAPI } from '@/api/chat'
 import type { Conversation, Message } from '@/api/chat'
+import { useAuthStore } from '@/stores/auth'
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
@@ -12,10 +13,15 @@ export const useChatStore = defineStore('chat', () => {
   const typingUsers = ref<Set<number>>(new Set())
   const onlineUsers = ref<Set<number>>(new Set())
   const loading = ref(false)
+  const loadingMore = ref(false)
+  const hasMore = ref(true)
 
   const totalUnread = computed(() => {
+    const authStore = useAuthStore()
+    if (!authStore.user) return 0
     return conversations.value.reduce((sum, c) => {
-      return sum + c.unread_buyer + c.unread_seller
+      const unread = c.buyer_id === authStore.user!.id ? c.unread_buyer : c.unread_seller
+      return sum + unread
     }, 0)
   })
 
@@ -28,14 +34,52 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function fetchMessages(conversationId: number, page = 1) {
-    const result = await chatAPI.getMessages(conversationId, page)
-    if (page === 1) {
+  async function fetchMessages(conversationId: number) {
+    hasMore.value = true
+    loading.value = true
+    try {
+      const result = await chatAPI.getMessages(conversationId, 0, 20)
       messages.value = result.messages.reverse()
-    } else {
-      messages.value = [...result.messages.reverse(), ...messages.value]
+      hasMore.value = result.has_more
+    } finally {
+      loading.value = false
     }
-    return result
+    return { hasMore: hasMore.value }
+  }
+
+  async function loadMoreMessages(conversationId: number) {
+    if (!hasMore.value || loadingMore.value || messages.value.length === 0) return
+    loadingMore.value = true
+    const cursor = messages.value[0].id
+    try {
+      const result = await chatAPI.getMessages(conversationId, cursor, 20)
+      if (result.messages.length > 0) {
+        messages.value = [...result.messages.reverse(), ...messages.value]
+      }
+      hasMore.value = result.has_more
+    } finally {
+      loadingMore.value = false
+    }
+  }
+
+  async function markConversationRead(conversationId: number) {
+    try {
+      await chatAPI.markConversationRead(conversationId)
+      // 更新本地未读计数
+      const conv = conversations.value.find(c => c.id === conversationId)
+      if (conv) {
+        const authStore = useAuthStore()
+        if (authStore.user) {
+          if (conv.buyer_id === authStore.user.id) {
+            conv.unread_buyer = 0
+          } else {
+            conv.unread_seller = 0
+          }
+        }
+      }
+    } catch {
+      // silent fail
+    }
   }
 
   async function createConversation(productId: number, sellerId: number) {
@@ -162,9 +206,13 @@ export const useChatStore = defineStore('chat', () => {
     typingUsers,
     onlineUsers,
     loading,
+    loadingMore,
+    hasMore,
     totalUnread,
     fetchConversations,
     fetchMessages,
+    loadMoreMessages,
+    markConversationRead,
     createConversation,
     connectWebSocket,
     sendMessage,
