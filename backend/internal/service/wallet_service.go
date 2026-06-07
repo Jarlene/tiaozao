@@ -54,13 +54,19 @@ func (s *WalletService) TopUp(userID uint, req *TopUpReq) (*WalletInfo, int, err
 		return nil, errors.ErrInternal, err
 	}
 
-	// 在同一个事务中执行余额更新和流水记录，确保原子性
+	// Execute balance update and transaction record atomically
 	if err := s.userRepo.Transaction(func(tx *gorm.DB) error {
+		// Read latest balance inside transaction for audit accuracy
+		user, err = s.userRepo.FindByID(userID)
+		if err != nil {
+			return err
+		}
+
 		if err := s.userRepo.UpdateBalance(tx, userID, req.Amount, 0); err != nil {
 			return err
 		}
 
-		// 记录充值流水
+		// Record top-up transaction with accurate balance snapshot
 		wt := &model.WalletTransaction{
 			UserID:        userID,
 			Type:          model.WalletTxTopUp,
@@ -70,7 +76,7 @@ func (s *WalletService) TopUp(userID uint, req *TopUpReq) (*WalletInfo, int, err
 			BalanceAfter:  user.Balance + req.Amount,
 			FrozenBefore:  user.FrozenBalance,
 			FrozenAfter:   user.FrozenBalance,
-			Description:   fmt.Sprintf("充值 %.2f 元", float64(req.Amount)/100),
+			Description:   fmt.Sprintf("Top up %.2f", float64(req.Amount)/100),
 		}
 		return s.userRepo.CreateWalletTransaction(tx, wt)
 	}); err != nil {
