@@ -23,6 +23,7 @@ type Product struct {
 	Status      ProductStatus  `gorm:"default:1;not null" json:"status"`
 	UserID      uint           `gorm:"not null;index" json:"user_id"`
 	CategoryID  *uint          `json:"category_id"`
+	Stock       int            `gorm:"default:1;not null" json:"stock"` // 库存量
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`

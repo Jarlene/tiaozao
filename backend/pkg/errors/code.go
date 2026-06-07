@@ -35,6 +35,9 @@ const (
 	ErrCategoryNotFound = 40403
 	ErrReviewNotFound   = 40404
 
+	// 订单
+	ErrOrderNotFound = 40405
+
 	// 服务端
 	ErrInternal = 50001
 	// 评论
@@ -42,6 +45,9 @@ const (
 	ErrAlreadyReplied   = 40010 // 已回复过该评论
 	ErrReviewContentTooLong = 40011 // 评论内容超长
 	ErrInvalidRating    = 40012 // 评分无效
+
+	// 库存
+	ErrInsufficientStock = 40013 // 库存不足
 )
 
 var MessageMap = map[int]string{
@@ -68,4 +74,6 @@ var MessageMap = map[int]string{
 	ErrInvalidRating:      "评分无效（1-5星）",
 	ErrCannotReviewOwn:    "不能评价自己的商品",
 	ErrReviewNotFound:     "评论不存在",
+	ErrOrderNotFound:      "订单不存在",
+	ErrInsufficientStock:  "库存不足",
 }
