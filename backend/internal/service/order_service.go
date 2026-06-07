@@ -173,10 +173,14 @@ func (s *OrderService) Cancel(userID, orderID uint) (int, error) {
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
 		originalStatus := order.Status
-		order.Status = newStatus
-		if err := txRepo.Update(order); err != nil {
+		affected, err := txRepo.UpdateStatusConditional(order.ID, newStatus, originalStatus)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = newStatus
 		// 取消订单，恢复库存
 		if err := txRepo.IncrementProductStock(order.ProductID, 1); err != nil {
 			return err
@@ -190,6 +194,9 @@ func (s *OrderService) Cancel(userID, orderID uint) (int, error) {
 			OperatorType: "buyer",
 		})
 	}); err != nil {
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
+		}
 		return errors.ErrInternal, err
 	}
 
@@ -213,20 +220,22 @@ func (s *OrderService) Pay(userID, orderID uint) (int, error) {
 	}
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
-		tx := txRepo.GetDB()
-
-		// 1. 更新订单状态为已付款
+		// 1. 乐观锁更新：仅当前状态为 PendingPayment 时才变更为 Paid
 		fromStatus := order.Status
-		order.Status = newStatus
-		if err := txRepo.Update(order); err != nil {
+		affected, err := txRepo.UpdateStatusConditional(order.ID, newStatus, fromStatus)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = newStatus
 		if err := s.logStatusChange(txRepo, order.ID, fromStatus, newStatus, string(OrderEventPay), userID, "buyer"); err != nil {
 			return err
 		}
 
-		// 2. 在事务内读取买家最新余额，确保审计快照准确
-		buyer, err := s.userRepo.FindByID(userID)
+		// 2. 在事务内读取买家最新余额，确保审计快照准确（使用事务连接）
+		buyer, err := txRepo.FindUserByID(userID)
 		if err != nil {
 			return err
 		}
@@ -236,7 +245,7 @@ func (s *OrderService) Pay(userID, orderID uint) (int, error) {
 		}
 
 		// 3. 原子性扣减可用余额，增加冻结余额（资金进入托管）
-		if err := s.userRepo.UpdateBalance(tx, userID, -order.Price, order.Price); err != nil {
+		if err := txRepo.UpdateUserBalance(userID, -order.Price, order.Price); err != nil {
 			return err
 		}
 
@@ -252,7 +261,7 @@ func (s *OrderService) Pay(userID, orderID uint) (int, error) {
 			FrozenAfter:   buyer.FrozenBalance + order.Price,
 			Description:   fmt.Sprintf("订单 %s 付款 %.2f 元", order.OrderNo, float64(order.Price)/100),
 		}
-		if err := s.userRepo.CreateWalletTransaction(tx, wt); err != nil {
+		if err := txRepo.CreateWalletTransaction(wt); err != nil {
 			return err
 		}
 
@@ -262,10 +271,14 @@ func (s *OrderService) Pay(userID, orderID uint) (int, error) {
 			return fmt.Errorf("notify seller transition failed: %w", fsmErr)
 		}
 		fromNotify := order.Status
-		order.Status = notifyStatus
-		if err := txRepo.Update(order); err != nil {
+		affected, err = txRepo.UpdateStatusConditional(order.ID, notifyStatus, fromNotify)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = notifyStatus
 		if err := s.logStatusChange(txRepo, order.ID, fromNotify, notifyStatus, string(OrderEventNotifySeller), userID, "system"); err != nil {
 			return err
 		}
@@ -274,6 +287,9 @@ func (s *OrderService) Pay(userID, orderID uint) (int, error) {
 	}); err != nil {
 		if stdErrors.Is(err, repository.ErrBalanceInsufficient) {
 			return errors.ErrInsufficientBalance, nil
+		}
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
 		}
 		return errors.ErrInternal, err
 	}
@@ -321,7 +337,7 @@ func (s *OrderService) ConfirmReceive(userID, orderID uint) (int, error) {
 		return code, nil
 	}
 
-	// 1. 校验状态机：Shipped → Received
+	// 1. FSM 前置校验（事务内通过 UpdateStatusConditional 二次校验并发安全）
 	receivedStatus, err := s.fsm.Transition(order.Status, OrderEventConfirmReceive)
 	if err != nil {
 		return errors.ErrBadRequest, nil
@@ -334,35 +350,56 @@ func (s *OrderService) ConfirmReceive(userID, orderID uint) (int, error) {
 	}
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
-		tx := txRepo.GetDB()
-
-		// 3a. 更新订单状态为已收货
-		fromStatus := order.Status
+		// 3a. 乐观锁更新：仅当前状态为 Shipped 时才变更为 Received
+		affected, err := txRepo.UpdateStatusConditional(order.ID, receivedStatus, model.OrderStatusShipped)
+		if err != nil {
+			return err
+		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
 		order.Status = receivedStatus
-		if err := txRepo.Update(order); err != nil {
-			return err
-		}
-		if err := s.logStatusChange(txRepo, order.ID, fromStatus, receivedStatus, string(OrderEventConfirmReceive), userID, "buyer"); err != nil {
+
+		// 3b. 记录已收货日志
+		if err := s.logStatusChange(txRepo, order.ID, model.OrderStatusShipped, receivedStatus, string(OrderEventConfirmReceive), userID, "buyer"); err != nil {
 			return err
 		}
 
-		// 3b. 资金释放：买家冻结余额扣减，卖家可用余额增加
-		// UpdateBalance 内部有余额充足校验（frozen_balance + delta >= 0）
-		if err := s.userRepo.UpdateBalance(tx, order.BuyerID, 0, -order.Price); err != nil {
+		// 3c. 在事务内读取余额，确保审计快照与资金操作使用同一数据库连接
+		buyer, err := txRepo.FindUserByID(order.BuyerID)
+		if err != nil {
 			return err
 		}
-		if err := s.userRepo.UpdateBalance(tx, order.SellerID, order.Price, 0); err != nil {
-			return err
-		}
-
-		// 3c. 在事务内读取卖家最新余额，确保审计快照准确
-		seller, err := s.userRepo.FindByID(order.SellerID)
+		seller, err := txRepo.FindUserByID(order.SellerID)
 		if err != nil {
 			return err
 		}
 
-		// 3d. 记录卖家收款流水（type=complete）
-		wt := &model.WalletTransaction{
+		// 3d. 资金释放：买家冻结余额扣减，卖家可用余额增加
+		if err := txRepo.UpdateUserBalance(order.BuyerID, 0, -order.Price); err != nil {
+			return err
+		}
+		if err := txRepo.UpdateUserBalance(order.SellerID, order.Price, 0); err != nil {
+			return err
+		}
+
+		// 3e. 记录买家资金释放流水
+		if err := txRepo.CreateWalletTransaction(&model.WalletTransaction{
+			UserID:        order.BuyerID,
+			Type:          model.WalletTxComplete,
+			Amount:        0,
+			OrderID:       order.ID,
+			BalanceBefore: buyer.Balance,
+			BalanceAfter:  buyer.Balance,
+			FrozenBefore:  buyer.FrozenBalance,
+			FrozenAfter:   buyer.FrozenBalance - order.Price,
+			Description:   fmt.Sprintf("订单 %s 已完成，托管资金释放 %.2f 元", order.OrderNo, float64(order.Price)/100),
+		}); err != nil {
+			return err
+		}
+
+		// 3f. 记录卖家收款流水
+		if err := txRepo.CreateWalletTransaction(&model.WalletTransaction{
 			UserID:        order.SellerID,
 			Type:          model.WalletTxComplete,
 			Amount:        order.Price,
@@ -372,24 +409,33 @@ func (s *OrderService) ConfirmReceive(userID, orderID uint) (int, error) {
 			FrozenBefore:  seller.FrozenBalance,
 			FrozenAfter:   seller.FrozenBalance,
 			Description:   fmt.Sprintf("订单 %s 收款 %.2f 元", order.OrderNo, float64(order.Price)/100),
-		}
-		if err := s.userRepo.CreateWalletTransaction(tx, wt); err != nil {
+		}); err != nil {
 			return err
 		}
 
-		// 3e. 自动完成：已收货 → 已完成
-		order.Status = completedStatus
-		if err := txRepo.Update(order); err != nil {
+		// 3g. 乐观锁更新：仅当前状态为 Received 时才变更为 Completed
+		affected, err = txRepo.UpdateStatusConditional(order.ID, completedStatus, receivedStatus)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = completedStatus
+
+		// 3h. 记录已完成日志
 		if err := s.logStatusChange(txRepo, order.ID, receivedStatus, completedStatus, string(OrderEventComplete), userID, "system"); err != nil {
 			return err
 		}
 
 		return nil
+
 	}); err != nil {
 		if stdErrors.Is(err, repository.ErrBalanceInsufficient) {
 			return errors.ErrInsufficientBalance, nil
+		}
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
 		}
 		return errors.ErrInternal, err
 	}
@@ -435,15 +481,23 @@ func (s *OrderService) RequestRefund(userID, orderID uint, req *RequestRefundReq
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
 		fromStatus := order.Status
+		// 乐观锁：仅当前状态为 shipped/received 时才变更为 refunding
+		affected, err := txRepo.UpdateStatusConditional(order.ID, newStatus, fromStatus)
+		if err != nil {
+			return err
+		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
 		// 记录退款前状态和退款原因，用于后续资金处理
 		order.PreRefundStatus = fromStatus
-		order.Status = newStatus
 		if req != nil && req.Reason != "" {
 			order.RefundReason = req.Reason
 		}
 		if err := txRepo.Update(order); err != nil {
 			return err
 		}
+		order.Status = newStatus
 
 		// 记录退款申请日志，附上退款原因（截断到安全长度）
 		eventDesc := string(OrderEventRequestRefund)
@@ -453,6 +507,9 @@ func (s *OrderService) RequestRefund(userID, orderID uint, req *RequestRefundReq
 		}
 		return s.logStatusChange(txRepo, order.ID, fromStatus, newStatus, eventDesc, userID, "buyer")
 	}); err != nil {
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
+		}
 		return errors.ErrInternal, err
 	}
 
@@ -486,8 +543,7 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 	price := order.Price
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
-		tx := txRepo.GetDB()
-
+		
 		// 根据退款前状态执行不同的资金操作
 		switch order.PreRefundStatus {
 		case model.OrderStatusShipped:
@@ -498,7 +554,7 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 				return err
 			}
 
-			if err := s.userRepo.UpdateBalance(tx, order.BuyerID, price, -price); err != nil {
+			if err := txRepo.UpdateUserBalance(order.BuyerID, price, -price); err != nil {
 				return err
 			}
 
@@ -514,7 +570,7 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 				FrozenAfter:   buyer.FrozenBalance - price,
 				Description:   fmt.Sprintf("订单 %s 退款 %.2f 元（解冻退回）", order.OrderNo, float64(price)/100),
 			}
-			if err := s.userRepo.CreateWalletTransaction(tx, wt); err != nil {
+			if err := txRepo.CreateWalletTransaction(wt); err != nil {
 				return err
 			}
 
@@ -531,11 +587,11 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 			}
 
 			// 扣减卖家余额
-			if err := s.userRepo.UpdateBalance(tx, order.SellerID, -price, 0); err != nil {
+			if err := txRepo.UpdateUserBalance(order.SellerID, -price, 0); err != nil {
 				return err
 			}
 			// 增加买家余额
-			if err := s.userRepo.UpdateBalance(tx, order.BuyerID, price, 0); err != nil {
+			if err := txRepo.UpdateUserBalance(order.BuyerID, price, 0); err != nil {
 				return err
 			}
 
@@ -551,7 +607,7 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 				FrozenAfter:   seller.FrozenBalance,
 				Description:   fmt.Sprintf("订单 %s 退款 %.2f 元（卖家扣除）", order.OrderNo, float64(price)/100),
 			}
-			if err := s.userRepo.CreateWalletTransaction(tx, wtSeller); err != nil {
+			if err := txRepo.CreateWalletTransaction(wtSeller); err != nil {
 				return err
 			}
 
@@ -567,7 +623,7 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 				FrozenAfter:   buyer.FrozenBalance,
 				Description:   fmt.Sprintf("订单 %s 退款 %.2f 元（买家到账）", order.OrderNo, float64(price)/100),
 			}
-			if err := s.userRepo.CreateWalletTransaction(tx, wtBuyer); err != nil {
+			if err := txRepo.CreateWalletTransaction(wtBuyer); err != nil {
 				return err
 			}
 
@@ -578,10 +634,14 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 
 		// 更新订单状态为已完成
 		fromStatus := order.Status
-		order.Status = newStatus
-		if err := txRepo.Update(order); err != nil {
+		affected, err := txRepo.UpdateStatusConditional(order.ID, newStatus, fromStatus)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = newStatus
 		if err := s.logStatusChange(txRepo, order.ID, fromStatus, newStatus, string(OrderEventApproveRefund), sellerID, "seller"); err != nil {
 			return err
 		}
@@ -590,6 +650,9 @@ func (s *OrderService) ApproveRefund(sellerID, orderID uint) (int, error) {
 	}); err != nil {
 		if stdErrors.Is(err, repository.ErrBalanceInsufficient) {
 			return errors.ErrInsufficientBalance, nil
+		}
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
 		}
 		return errors.ErrInternal, err
 	}
@@ -661,8 +724,7 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 	price := order.Price
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
-		tx := txRepo.GetDB()
-
+		
 		// 根据退款前状态执行不同的资金操作
 		switch order.PreRefundStatus {
 		case model.OrderStatusShipped:
@@ -672,7 +734,7 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 				return err
 			}
 
-			if err := s.userRepo.UpdateBalance(tx, order.BuyerID, price, -price); err != nil {
+			if err := txRepo.UpdateUserBalance(order.BuyerID, price, -price); err != nil {
 				return err
 			}
 
@@ -687,7 +749,7 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 				FrozenAfter:   buyer.FrozenBalance - price,
 				Description:   fmt.Sprintf("管理员退款：订单 %s 退款 %.2f 元（解冻退回）", order.OrderNo, float64(price)/100),
 			}
-			if err := s.userRepo.CreateWalletTransaction(tx, wt); err != nil {
+			if err := txRepo.CreateWalletTransaction(wt); err != nil {
 				return err
 			}
 
@@ -702,10 +764,10 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 				return err
 			}
 
-			if err := s.userRepo.UpdateBalance(tx, order.SellerID, -price, 0); err != nil {
+			if err := txRepo.UpdateUserBalance(order.SellerID, -price, 0); err != nil {
 				return err
 			}
-			if err := s.userRepo.UpdateBalance(tx, order.BuyerID, price, 0); err != nil {
+			if err := txRepo.UpdateUserBalance(order.BuyerID, price, 0); err != nil {
 				return err
 			}
 
@@ -720,7 +782,7 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 				FrozenAfter:   seller.FrozenBalance,
 				Description:   fmt.Sprintf("管理员退款：订单 %s 退款 %.2f 元（卖家扣除）", order.OrderNo, float64(price)/100),
 			}
-			if err := s.userRepo.CreateWalletTransaction(tx, wtSeller); err != nil {
+			if err := txRepo.CreateWalletTransaction(wtSeller); err != nil {
 				return err
 			}
 
@@ -735,7 +797,7 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 				FrozenAfter:   buyer.FrozenBalance,
 				Description:   fmt.Sprintf("管理员退款：订单 %s 退款 %.2f 元（买家到账）", order.OrderNo, float64(price)/100),
 			}
-			if err := s.userRepo.CreateWalletTransaction(tx, wtBuyer); err != nil {
+			if err := txRepo.CreateWalletTransaction(wtBuyer); err != nil {
 				return err
 			}
 
@@ -745,10 +807,14 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 
 		// 更新订单状态为已完成
 		fromStatus := order.Status
-		order.Status = newStatus
-		if err := txRepo.Update(order); err != nil {
+		affected, err := txRepo.UpdateStatusConditional(order.ID, newStatus, fromStatus)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = newStatus
 		if err := s.logStatusChange(txRepo, order.ID, fromStatus, newStatus, string(OrderEventRefundSuccess), operatorID, "admin"); err != nil {
 			return err
 		}
@@ -757,6 +823,9 @@ func (s *OrderService) CompleteRefund(operatorID, orderID uint) (int, error) {
 	}); err != nil {
 		if stdErrors.Is(err, repository.ErrBalanceInsufficient) {
 			return errors.ErrInsufficientBalance, nil
+		}
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
 		}
 		return errors.ErrInternal, err
 	}
@@ -837,8 +906,7 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 	price := order.Price
 
 	if err := s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
-		tx := txRepo.GetDB()
-
+		
 		if req.Decision == "buyer" {
 			// 管理员裁定支持买家 → 退款给买家
 			switch order.PreRefundStatus {
@@ -850,7 +918,7 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 					return err
 				}
 
-				if err := s.userRepo.UpdateBalance(tx, order.BuyerID, price, -price); err != nil {
+				if err := txRepo.UpdateUserBalance(order.BuyerID, price, -price); err != nil {
 					return err
 				}
 
@@ -865,7 +933,7 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 					FrozenAfter:   buyer.FrozenBalance - price,
 					Description:   fmt.Sprintf("仲裁支持买家：订单 %s 退款 %.2f 元（解冻退回）", order.OrderNo, float64(price)/100),
 				}
-				if err := s.userRepo.CreateWalletTransaction(tx, wt); err != nil {
+				if err := txRepo.CreateWalletTransaction(wt); err != nil {
 					return err
 				}
 
@@ -882,11 +950,11 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 				}
 
 				// 扣减卖家余额
-				if err := s.userRepo.UpdateBalance(tx, order.SellerID, -price, 0); err != nil {
+				if err := txRepo.UpdateUserBalance(order.SellerID, -price, 0); err != nil {
 					return err
 				}
 				// 增加买家余额
-				if err := s.userRepo.UpdateBalance(tx, order.BuyerID, price, 0); err != nil {
+				if err := txRepo.UpdateUserBalance(order.BuyerID, price, 0); err != nil {
 					return err
 				}
 
@@ -902,7 +970,7 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 					FrozenAfter:   seller.FrozenBalance,
 					Description:   fmt.Sprintf("仲裁支持买家：订单 %s 退款 %.2f 元（卖家扣除）", order.OrderNo, float64(price)/100),
 				}
-				if err := s.userRepo.CreateWalletTransaction(tx, wtSeller); err != nil {
+				if err := txRepo.CreateWalletTransaction(wtSeller); err != nil {
 					return err
 				}
 
@@ -918,7 +986,7 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 					FrozenAfter:   buyer.FrozenBalance,
 					Description:   fmt.Sprintf("仲裁支持买家：订单 %s 退款 %.2f 元（买家到账）", order.OrderNo, float64(price)/100),
 				}
-				if err := s.userRepo.CreateWalletTransaction(tx, wtBuyer); err != nil {
+				if err := txRepo.CreateWalletTransaction(wtBuyer); err != nil {
 					return err
 				}
 
@@ -928,23 +996,44 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 		} else {
 			// 管理员裁定支持卖家 → 资金释放给卖家
 			switch order.PreRefundStatus {
-			case model.OrderStatusShipped:
-				// 资金仍在买家冻结余额中 → 释放给卖家
-				// 在事务内读取余额确保审计快照准确
-				seller, err := s.userRepo.FindByID(order.SellerID)
-				if err != nil {
-					return err
-				}
+				case model.OrderStatusShipped:
+					// Funds in buyer frozen -> release to seller
+					// Read balances before updating for audit accuracy
+					buyer, err := s.userRepo.FindByID(order.BuyerID)
+					if err != nil {
+						return err
+					}
+					seller, err := s.userRepo.FindByID(order.SellerID)
+					if err != nil {
+						return err
+					}
 
-				// 买家冻结余额扣减
-				if err := s.userRepo.UpdateBalance(tx, order.BuyerID, 0, -price); err != nil {
-					return err
-				}
-				// 卖家可用余额增加
-				if err := s.userRepo.UpdateBalance(tx, order.SellerID, price, 0); err != nil {
-					return err
-				}
+					// Decrease buyer frozen
+					if err := txRepo.UpdateUserBalance(order.BuyerID, 0, -price); err != nil {
+						return err
+					}
+					// Increase seller available balance
+					if err := txRepo.UpdateUserBalance(order.SellerID, price, 0); err != nil {
+						return err
+					}
 
+					// Record buyer frozen release
+					wtBuyer := &model.WalletTransaction{
+						UserID:        order.BuyerID,
+						Type:          model.WalletTxComplete,
+						Amount:        0,
+						OrderID:       order.ID,
+						BalanceBefore: buyer.Balance,
+						BalanceAfter:  buyer.Balance,
+						FrozenBefore:  buyer.FrozenBalance,
+						FrozenAfter:   buyer.FrozenBalance - price,
+						Description:   fmt.Sprintf("Arbitrate seller: Order %s frozen release %.2f", order.OrderNo, float64(price)/100),
+					}
+					if err := txRepo.CreateWalletTransaction(wtBuyer); err != nil {
+						return err
+					}
+
+					// Record seller receipt
 				// 记录卖家收款流水
 				wt := &model.WalletTransaction{
 					UserID:        order.SellerID,
@@ -957,7 +1046,7 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 					FrozenAfter:   seller.FrozenBalance,
 					Description:   fmt.Sprintf("仲裁支持卖家：订单 %s 资金释放 %.2f 元", order.OrderNo, float64(price)/100),
 				}
-				if err := s.userRepo.CreateWalletTransaction(tx, wt); err != nil {
+				if err := txRepo.CreateWalletTransaction(wt); err != nil {
 					return err
 				}
 
@@ -972,16 +1061,23 @@ func (s *OrderService) Arbitrate(adminID, orderID uint, req *ArbitrateReq) (int,
 
 		// 更新订单状态为已完成
 		fromStatus := order.Status
-		order.Status = newStatus
-		if err := txRepo.Update(order); err != nil {
+		affected, err := txRepo.UpdateStatusConditional(order.ID, newStatus, fromStatus)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = newStatus
 
 		eventDesc := string(OrderEventArbitrate) + ":" + req.Decision
 		return s.logStatusChange(txRepo, order.ID, fromStatus, newStatus, eventDesc, adminID, "admin")
 	}); err != nil {
 		if stdErrors.Is(err, repository.ErrBalanceInsufficient) {
 			return errors.ErrInsufficientBalance, nil
+		}
+		if stdErrors.Is(err, repository.ErrStatusConflict) {
+			return errors.ErrBadRequest, nil
 		}
 		return errors.ErrInternal, err
 	}
@@ -1202,10 +1298,14 @@ func (s *OrderService) getOrderForSeller(orderID, sellerID uint) (*model.Order, 
 func (s *OrderService) transitionAndLog(order *model.Order, target model.OrderStatus, event OrderEvent, operatorID uint, operatorType string) error {
 	return s.orderRepo.Transaction(func(txRepo repository.OrderRepository) error {
 		from := order.Status
-		order.Status = target
-		if err := txRepo.Update(order); err != nil {
+		affected, err := txRepo.UpdateStatusConditional(order.ID, target, from)
+		if err != nil {
 			return err
 		}
+		if !affected {
+			return repository.ErrStatusConflict
+		}
+		order.Status = target
 		return s.logStatusChange(txRepo, order.ID, from, target, string(event), operatorID, operatorType)
 	})
 }
