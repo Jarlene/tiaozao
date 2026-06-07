@@ -17,8 +17,20 @@
               <n-button quaternary @click="$router.push('/products/mine')">
                 我的发布
               </n-button>
+              <n-button quaternary @click="$router.push('/orders')">
+                我的订单
+              </n-button>
+              <n-button quaternary @click="$router.push('/orders/sold')">
+                我的出售
+              </n-button>
+              <n-button quaternary @click="$router.push('/wallet')">
+                钱包
+              </n-button>
               <n-button quaternary @click="$router.push('/categories')">
                 分类管理
+              </n-button>
+              <n-button quaternary @click="$router.push('/orders/disputes')">
+                纠纷管理
               </n-button>
               <n-badge :value="chatStore.totalUnread" :max="99">
                 <n-button quaternary @click="$router.push('/messages')">
