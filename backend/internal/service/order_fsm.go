@@ -17,7 +17,9 @@ const (
 	OrderEventConfirmReceive OrderEvent = "confirm_receive" // 买家确认收货
 	OrderEventComplete       OrderEvent = "complete"        // 完成
 	OrderEventRequestRefund  OrderEvent = "request_refund"  // 买家申请退款
-	OrderEventRefundSuccess  OrderEvent = "refund_success"  // 退款成功
+	OrderEventRefundSuccess  OrderEvent = "refund_success"  // 退款成功（系统/卖家同意）
+	OrderEventApproveRefund  OrderEvent = "approve_refund"  // 卖家同意退款（日志用）
+	OrderEventRejectRefund   OrderEvent = "reject_refund"   // 卖家拒绝退款（日志用）
 	OrderEventRaiseDispute   OrderEvent = "raise_dispute"   // 升级为纠纷
 	OrderEventArbitrate      OrderEvent = "arbitrate"       // 管理员仲裁
 )
@@ -32,6 +34,8 @@ var OrderEventNames = map[OrderEvent]string{
 	OrderEventComplete:       "完成订单",
 	OrderEventRequestRefund:  "申请退款",
 	OrderEventRefundSuccess:  "退款成功",
+	OrderEventApproveRefund:  "同意退款",
+	OrderEventRejectRefund:   "拒绝退款",
 	OrderEventRaiseDispute:   "发起纠纷",
 	OrderEventArbitrate:      "仲裁",
 }
@@ -76,6 +80,8 @@ func (fsm *OrderFSM) initTransitions() {
 	}
 
 	// 事件映射
+	// 注：FSM 用 transitionRule（From→To 对）作为 map key，同一对只对应一个事件
+	// 语义区分（如"卖家同意"vs"系统退款"）由 service 方法在状态日志中体现
 	eventMap := map[transitionRule]OrderEvent{
 		{From: model.OrderStatusPendingPayment, To: model.OrderStatusCancelled}:       OrderEventCancel,
 		{From: model.OrderStatusPendingPayment, To: model.OrderStatusPaid}:            OrderEventPay,

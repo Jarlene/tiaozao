@@ -60,6 +60,12 @@
               </n-tag>
               <n-text depth="3" style="font-size: 12px">{{ order.created_at }}</n-text>
             </n-space>
+            <!-- 已发货：显示物流信息 -->
+            <template v-if="order.status === OrderStatus.SHIPPED">
+              <n-text depth="3" style="font-size: 12px">
+                已发货，等待买家确认收货
+              </n-text>
+            </template>
           </n-space>
 
           <!-- 操作按钮 -->
@@ -72,7 +78,7 @@
 
               <!-- 待发货：发货 -->
               <template v-if="order.status === OrderStatus.PENDING_SHIPMENT">
-                <n-button size="tiny" type="primary" @click="handleShip(order.id)">
+                <n-button size="tiny" type="primary" @click="openShipModal(order.id)">
                   立即发货
                 </n-button>
               </template>
@@ -125,6 +131,26 @@
         />
       </n-space>
     </n-spin>
+
+    <!-- 发货弹窗 -->
+    <n-modal v-model:show="showShipModal" preset="card" title="发货" style="width: 420px" :mask-closable="false">
+      <n-space vertical>
+        <n-form label-placement="top" label-width="auto">
+          <n-form-item label="快递单号">
+            <n-input v-model:value="trackingNumber" placeholder="请输入快递单号（选填）" clearable />
+          </n-form-item>
+          <n-form-item label="物流公司">
+            <n-input v-model:value="logisticsCompany" placeholder="请输入物流公司名称（选填）" clearable />
+          </n-form-item>
+        </n-form>
+        <n-space justify="end">
+          <n-button @click="closeShipModal">取消</n-button>
+          <n-button type="primary" :loading="shipSubmitting" @click="submitShip">
+            确认发货
+          </n-button>
+        </n-space>
+      </n-space>
+    </n-modal>
   </n-space>
 </template>
 
@@ -145,6 +171,46 @@ const pageSize = ref(20)
 const total = ref(0)
 const currentStatus = ref<number | undefined>(undefined)
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
+
+// 发货弹窗状态
+const showShipModal = ref(false)
+const shipOrderId = ref<number | null>(null)
+const trackingNumber = ref('')
+const logisticsCompany = ref('')
+const shipSubmitting = ref(false)
+
+function openShipModal(orderId: number) {
+  shipOrderId.value = orderId
+  trackingNumber.value = ''
+  logisticsCompany.value = ''
+  showShipModal.value = true
+}
+
+function closeShipModal() {
+  showShipModal.value = false
+  shipOrderId.value = null
+  trackingNumber.value = ''
+  logisticsCompany.value = ''
+}
+
+async function submitShip() {
+  if (shipOrderId.value === null) return
+  shipSubmitting.value = true
+  try {
+    await orderAPI.ship(shipOrderId.value, {
+      tracking_number: trackingNumber.value || undefined,
+      logistics_company: logisticsCompany.value || undefined,
+    })
+    message.success('已标记为发货')
+    closeShipModal()
+    loadOrders()
+  } catch (err: any) {
+    const msg = err?.response?.data?.message || '操作失败'
+    message.error(msg)
+  } finally {
+    shipSubmitting.value = false
+  }
+}
 
 // 筛选标签：卖家视角
 const statusTabs = [
@@ -210,25 +276,6 @@ function changeStatus(status: number | undefined) {
 function changePage(page: number) {
   currentPage.value = page
   loadOrders()
-}
-
-async function handleShip(orderId: number) {
-  dialog.info({
-    title: '确认发货',
-    content: '确定要标记该订单为已发货吗？',
-    positiveText: '确认发货',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        await orderAPI.ship(orderId)
-        message.success('已标记为发货')
-        loadOrders()
-      } catch (err: any) {
-        const msg = err?.response?.data?.message || '操作失败'
-        message.error(msg)
-      }
-    },
-  })
 }
 
 function handleApproveRefund(orderId: number) {

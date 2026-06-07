@@ -91,7 +91,13 @@ func (h *OrderHandler) Ship(c *gin.Context) {
 		return
 	}
 
-	code, err := h.orderService.Ship(uint(userID), uint(id))
+	var req service.ShipReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, errors.ErrBadRequest)
+		return
+	}
+
+	code, err := h.orderService.Ship(uint(userID), uint(id), &req)
 	if err != nil {
 		Error(c, 500, errors.ErrInternal)
 		return
@@ -133,7 +139,55 @@ func (h *OrderHandler) RequestRefund(c *gin.Context) {
 		return
 	}
 
-	code, err := h.orderService.RequestRefund(uint(userID), uint(id))
+	var req service.RequestRefundReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, errors.ErrBadRequest)
+		return
+	}
+
+	code, err := h.orderService.RequestRefund(uint(userID), uint(id), &req)
+	if err != nil {
+		Error(c, 500, errors.ErrInternal)
+		return
+	}
+	if orderErrorResponse(c, code) {
+		return
+	}
+
+	Success(c, nil)
+}
+
+// ApproveRefund 卖家同意退款
+func (h *OrderHandler) ApproveRefund(c *gin.Context) {
+	userID, _ := strconv.ParseUint(c.GetString("user_id"), 10, 32)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		Error(c, 400, errors.ErrBadRequest)
+		return
+	}
+
+	code, err := h.orderService.ApproveRefund(uint(userID), uint(id))
+	if err != nil {
+		Error(c, 500, errors.ErrInternal)
+		return
+	}
+	if orderErrorResponse(c, code) {
+		return
+	}
+
+	Success(c, nil)
+}
+
+// RejectRefund 卖家拒绝退款
+func (h *OrderHandler) RejectRefund(c *gin.Context) {
+	userID, _ := strconv.ParseUint(c.GetString("user_id"), 10, 32)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		Error(c, 400, errors.ErrBadRequest)
+		return
+	}
+
+	code, err := h.orderService.RejectRefund(uint(userID), uint(id))
 	if err != nil {
 		Error(c, 500, errors.ErrInternal)
 		return
@@ -197,7 +251,13 @@ func (h *OrderHandler) Arbitrate(c *gin.Context) {
 		return
 	}
 
-	code, err := h.orderService.Arbitrate(uint(adminID), uint(id))
+	var req service.ArbitrateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, errors.ErrBadRequest)
+		return
+	}
+
+	code, err := h.orderService.Arbitrate(uint(adminID), uint(id), &req)
 	if err != nil {
 		Error(c, 500, errors.ErrInternal)
 		return
@@ -305,6 +365,25 @@ func (h *OrderHandler) GetStatusLogs(c *gin.Context) {
 	Success(c, logs)
 }
 
+// ListDisputes 管理员获取纠纷订单列表
+func (h *OrderHandler) ListDisputes(c *gin.Context) {
+	adminID, _ := strconv.ParseUint(c.GetString("user_id"), 10, 32)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+
+	result, code, err := h.orderService.ListDisputes(uint(adminID), page, pageSize)
+	if err != nil {
+		Error(c, 500, errors.ErrInternal)
+		return
+	}
+	if code != errors.Success {
+		orderErrorResponse(c, code)
+		return
+	}
+
+	Success(c, result)
+}
+
 // orderErrorResponse 将业务错误码转为 HTTP 状态码并返回错误响应
 // 返回 true 表示已处理（调用方应 return），false 表示无需处理
 func orderErrorResponse(c *gin.Context, code int) bool {
@@ -315,8 +394,12 @@ func orderErrorResponse(c *gin.Context, code int) bool {
 	switch code {
 	case errors.ErrProductNotFound, errors.ErrOrderNotFound:
 		httpStatus = 404
-	case errors.ErrForbidden:
+	case errors.ErrForbidden, errors.ErrForbiddenNotAdmin:
 		httpStatus = 403
+	case errors.ErrInsufficientBalance:
+		httpStatus = 422 // 余额不足
+	case errors.ErrInsufficientStock:
+		httpStatus = 409 // 库存不足（冲突）
 	}
 	Error(c, httpStatus, code)
 	return true

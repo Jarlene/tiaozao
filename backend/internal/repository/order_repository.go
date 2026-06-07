@@ -16,6 +16,9 @@ type OrderRepository interface {
 	ListByBuyer(buyerID uint, status *model.OrderStatus, page, pageSize int) ([]model.Order, int64, error)
 	ListBySeller(sellerID uint, status *model.OrderStatus, page, pageSize int) ([]model.Order, int64, error)
 
+	// 管理员按状态查询所有订单
+	ListByStatus(status model.OrderStatus, page, pageSize int) ([]model.Order, int64, error)
+
 	// 库存操作
 	DecrementProductStock(productID uint, quantity int) (bool, error) // true=扣减成功, false=库存不足
 	IncrementProductStock(productID uint, quantity int) error
@@ -26,6 +29,9 @@ type OrderRepository interface {
 
 	// 事务
 	Transaction(fc func(txRepo OrderRepository) error) error
+
+	// GetDB 获取底层数据库连接（用于在同一事务中操作其他表）
+	GetDB() *gorm.DB
 }
 
 type orderRepository struct {
@@ -81,7 +87,7 @@ func (r *orderRepository) DecrementProductStock(productID uint, quantity int) (b
 
 func (r *orderRepository) IncrementProductStock(productID uint, quantity int) error {
 	return r.db.Model(&model.Product{}).
-		Where("id = ?", productID).
+		Where("id = ? AND deleted_at IS NULL", productID).
 		UpdateColumn("stock", gorm.Expr("stock + ?", quantity)).Error
 }
 
@@ -99,6 +105,9 @@ func (r *orderRepository) ListByBuyer(buyerID uint, status *model.OrderStatus, p
 	}
 
 	err := query.
+		Preload("Product", func(db *gorm.DB) *gorm.DB {
+			return db.Preload("Images")
+		}).
 		Order("created_at DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
@@ -124,6 +133,37 @@ func (r *orderRepository) ListBySeller(sellerID uint, status *model.OrderStatus,
 	}
 
 	err := query.
+		Preload("Product", func(db *gorm.DB) *gorm.DB {
+			return db.Preload("Images")
+		}).
+		Order("created_at DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&orders).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return orders, total, nil
+}
+
+// ListByStatus 管理员按订单状态查询所有订单（不分卖家/买家）
+func (r *orderRepository) ListByStatus(status model.OrderStatus, page, pageSize int) ([]model.Order, int64, error) {
+	var orders []model.Order
+	var total int64
+
+	query := r.db.Model(&model.Order{}).Where("status = ?", status)
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	err := query.
+		Preload("Product", func(db *gorm.DB) *gorm.DB {
+			return db.Preload("Images")
+		}).
+		Preload("Buyer").
+		Preload("Seller").
 		Order("created_at DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
@@ -152,4 +192,8 @@ func (r *orderRepository) Transaction(fc func(txRepo OrderRepository) error) err
 		txRepo := &orderRepository{db: tx}
 		return fc(txRepo)
 	})
+}
+
+func (r *orderRepository) GetDB() *gorm.DB {
+	return r.db
 }

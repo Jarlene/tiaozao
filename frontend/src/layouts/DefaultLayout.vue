@@ -29,7 +29,7 @@
               <n-button quaternary @click="$router.push('/categories')">
                 分类管理
               </n-button>
-              <n-button quaternary @click="$router.push('/orders/disputes')">
+              <n-button v-if="authStore.isAdmin" quaternary @click="$router.push('/orders/disputes')">
                 纠纷管理
               </n-button>
               <n-badge :value="chatStore.totalUnread" :max="99">

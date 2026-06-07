@@ -135,6 +135,26 @@
         />
       </n-space>
     </n-spin>
+    
+    <!-- 退款原因弹窗 -->
+    <n-modal v-model:show="showRefundModal" preset="dialog" title="申请退款">
+      <n-space vertical>
+        <n-text>请填写退款原因：</n-text>
+        <n-input
+          v-model:value="refundReason"
+          type="textarea"
+          placeholder="请说明退款原因..."
+          :maxlength="500"
+          show-count
+        />
+      </n-space>
+      <template #action>
+        <n-space justify="end">
+          <n-button @click="showRefundModal = false">取消</n-button>
+          <n-button type="warning" @click="confirmRefund">申请退款</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </n-space>
 </template>
 
@@ -154,6 +174,9 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const currentStatus = ref<number | undefined>(undefined)
+const showRefundModal = ref(false)
+const refundReason = ref('')
+const refundOrderId = ref(0)
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 // 筛选标签：匹配买家视角的常见筛选维度
@@ -261,22 +284,25 @@ async function handleConfirmReceive(orderId: number) {
 }
 
 function handleRequestRefund(orderId: number) {
-  dialog.warning({
-    title: '申请退款',
-    content: '确定要申请退款吗？退款需要卖家确认处理。',
-    positiveText: '申请退款',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        await orderAPI.requestRefund(orderId)
-        message.success('退款申请已提交')
-        loadOrders()
-      } catch (err: any) {
-        const msg = err?.response?.data?.message || '申请失败'
-        message.error(msg)
-      }
-    },
-  })
+  refundOrderId.value = orderId
+  refundReason.value = ''
+  showRefundModal.value = true
+}
+
+async function confirmRefund() {
+  if (!refundReason.value.trim()) {
+    message.warning('请填写退款原因')
+    return
+  }
+  showRefundModal.value = false
+  try {
+    await orderAPI.requestRefund(refundOrderId.value, { reason: refundReason.value.trim() })
+    message.success('退款申请已提交')
+    loadOrders()
+  } catch (err: any) {
+    const msg = err?.response?.data?.message || '申请失败'
+    message.error(msg)
+  }
 }
 
 onMounted(() => {

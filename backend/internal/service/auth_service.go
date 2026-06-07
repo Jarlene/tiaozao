@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// 编译一次，全局复用
+const DefaultInitialBalance int64 = 1000 // 新用户默认赠送 10.00 元（单位：分，开发环境默认值，上线前调整为更小值或 0）
 var (
 	reUpper  = regexp.MustCompile(`[A-Z]`)
 	reLower  = regexp.MustCompile(`[a-z]`)
@@ -28,7 +28,7 @@ var (
 
 type AuthService struct {
 	userRepo repository.UserRepository
-	minio    *storage.MinIOClient
+	minio    *storage.MinIOClient // TODO: 预留，后续用于头像上传功能
 	cfg      *config.JWTConfig
 }
 
@@ -57,6 +57,7 @@ type UserProfile struct {
 	Email     string `json:"email"`
 	Nickname  string `json:"nickname"`
 	AvatarURL string `json:"avatar_url"`
+	Role      int    `json:"role"` // 1=user, 2=admin
 	CreatedAt string `json:"created_at"`
 }
 
@@ -81,6 +82,7 @@ func (s *AuthService) Register(req *RegisterReq) (*TokenPair, *UserProfile, int,
 		PasswordHash: string(hash),
 		Nickname:     extractNickname(req.Email),
 		Status:       1,
+		Balance:      DefaultInitialBalance,
 	}
 
 	if err := s.userRepo.Create(user); err != nil {
@@ -97,11 +99,12 @@ func (s *AuthService) Register(req *RegisterReq) (*TokenPair, *UserProfile, int,
 	}
 
 	profile := &UserProfile{
-		ID:        user.ID,
-		Email:     user.Email,
-		Nickname:  user.Nickname,
-		AvatarURL: user.AvatarURL,
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		ID:            user.ID,
+		Email:         user.Email,
+		Nickname:      user.Nickname,
+		AvatarURL:     user.AvatarURL,
+		Role:          user.Role,
+		CreatedAt:     user.CreatedAt.Format(time.RFC3339),
 	}
 
 	return tokens, profile, errors.Success, nil
@@ -130,11 +133,12 @@ func (s *AuthService) Login(req *LoginReq) (*TokenPair, *UserProfile, int, error
 	}
 
 	profile := &UserProfile{
-		ID:        user.ID,
-		Email:     user.Email,
-		Nickname:  user.Nickname,
-		AvatarURL: user.AvatarURL,
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		ID:            user.ID,
+		Email:         user.Email,
+		Nickname:      user.Nickname,
+		AvatarURL:     user.AvatarURL,
+		Role:          user.Role,
+		CreatedAt:     user.CreatedAt.Format(time.RFC3339),
 	}
 
 	return tokens, profile, errors.Success, nil
@@ -169,11 +173,12 @@ func (s *AuthService) GetProfile(userID uint) (*UserProfile, int, error) {
 	}
 
 	return &UserProfile{
-		ID:        user.ID,
-		Email:     user.Email,
-		Nickname:  user.Nickname,
-		AvatarURL: user.AvatarURL,
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		ID:            user.ID,
+		Email:         user.Email,
+		Nickname:      user.Nickname,
+		AvatarURL:     user.AvatarURL,
+		Role:          user.Role,
+		CreatedAt:     user.CreatedAt.Format(time.RFC3339),
 	}, errors.Success, nil
 }
 
@@ -192,11 +197,12 @@ func (s *AuthService) UpdateProfile(userID uint, req *UpdateProfileReq) (*UserPr
 	}
 
 	return &UserProfile{
-		ID:        user.ID,
-		Email:     user.Email,
-		Nickname:  user.Nickname,
-		AvatarURL: user.AvatarURL,
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		ID:            user.ID,
+		Email:         user.Email,
+		Nickname:      user.Nickname,
+		AvatarURL:     user.AvatarURL,
+		Role:          user.Role,
+		CreatedAt:     user.CreatedAt.Format(time.RFC3339),
 	}, errors.Success, nil
 }
 

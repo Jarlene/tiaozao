@@ -74,6 +74,36 @@
         <n-text>{{ order.shipping_address }}</n-text>
       </n-card>
 
+      <!-- 物流信息（已发货/已收货/已完成/退款中时显示） -->
+      <n-card v-if="order.tracking_number || order.logistics_company" title="物流信息" size="small" style="margin-bottom: 16px">
+        <n-descriptions label-placement="left" :column="1">
+          <n-descriptions-item v-if="order.logistics_company" label="物流公司">
+            <n-text>{{ order.logistics_company }}</n-text>
+          </n-descriptions-item>
+          <n-descriptions-item v-if="order.tracking_number" label="快递单号">
+            <n-text>{{ order.tracking_number }}</n-text>
+          </n-descriptions-item>
+        </n-descriptions>
+      </n-card>
+
+      <!-- 联系对方 -->
+      <n-card size="small" style="margin-bottom: 16px">
+        <n-space align="center" justify="space-between">
+          <n-text>
+            <template v-if="isBuyer">需要联系卖家？</template>
+            <template v-else-if="isSeller">需要联系买家？</template>
+          </n-text>
+          <n-button size="small" type="primary" ghost :loading="contactLoading" @click="handleContact">
+            <template #icon>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+            </template>
+            {{ isBuyer ? '联系卖家' : '联系买家' }}
+          </n-button>
+        </n-space>
+      </n-card>
+
       <!-- 状态变更时间线 -->
       <n-card title="状态变更记录" size="small" style="margin-bottom: 16px">
         <n-spin :show="logsLoading">
@@ -148,7 +178,7 @@
           <template v-else-if="isSeller">
             <!-- 待发货：发货 -->
             <template v-if="order.status === OrderStatus.PENDING_SHIPMENT">
-              <n-button type="primary" :loading="actionLoading" @click="handleShip">
+              <n-button type="primary" :loading="actionLoading" @click="openShipModal">
                 立即发货
               </n-button>
             </template>
@@ -174,6 +204,53 @@
       </template>
     </n-card>
   </n-spin>
+
+  <!-- 发货弹窗 -->
+  <n-modal v-model:show="showShipModal" preset="card" title="发货" style="width: 420px" :mask-closable="false">
+    <n-space vertical>
+      <n-form label-placement="top" label-width="auto">
+        <n-form-item label="快递单号">
+          <n-input v-model:value="trackingNumber" placeholder="请输入快递单号（选填）" clearable />
+        </n-form-item>
+        <n-form-item label="物流公司">
+          <n-input v-model:value="logisticsCompany" placeholder="请输入物流公司名称（选填）" clearable />
+        </n-form-item>
+      </n-form>
+      <n-space justify="end">
+        <n-button @click="closeShipModal">取消</n-button>
+        <n-button type="primary" :loading="actionLoading" @click="submitShip">确认发货</n-button>
+      </n-space>
+    </n-space>
+  </n-modal>
+
+  <!-- 退款弹窗 -->
+  <n-modal v-model:show="showRefundModal" preset="card" title="申请退款" style="width: 420px" :mask-closable="false">
+    <n-space vertical>
+      <n-form label-placement="top" label-width="auto">
+        <n-form-item label="退款原因" required>
+          <n-select
+            v-model:value="refundReason"
+            :options="refundReasonOptions"
+            placeholder="请选择退款原因"
+            clearable
+          />
+        </n-form-item>
+        <n-form-item label="备注说明">
+          <n-input
+            v-model:value="refundNote"
+            type="textarea"
+            :maxlength="500"
+            placeholder="请输入补充说明（选填）"
+            clearable
+          />
+        </n-form-item>
+      </n-form>
+      <n-space justify="end">
+        <n-button @click="closeRefundModal">取消</n-button>
+        <n-button type="warning" :loading="actionLoading" @click="submitRefund">提交退款申请</n-button>
+      </n-space>
+    </n-space>
+  </n-modal>
 </template>
 
 <script setup lang="ts">
@@ -181,6 +258,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, useDialog } from 'naive-ui'
 import { orderAPI, OrderStatus } from '@/api/orders'
+import { chatAPI } from '@/api/chat'
 import { formatPrice } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 import type { OrderDetail } from '@/api/orders'
@@ -197,6 +275,54 @@ const order = ref<OrderDetail | null>(null)
 const logsLoading = ref(false)
 const statusLogs = ref<any[]>([])
 const actionLoading = ref(false)
+const contactLoading = ref(false)
+
+// 发货弹窗状态
+const showShipModal = ref(false)
+const trackingNumber = ref('')
+const logisticsCompany = ref('')
+
+// 退款弹窗状态
+const showRefundModal = ref(false)
+const refundReason = ref<string | null>(null)
+const refundNote = ref('')
+const refundReasonOptions = [
+  { label: '商品与描述不符', value: '商品与描述不符' },
+  { label: '质量问题', value: '质量问题' },
+  { label: '未收到货', value: '未收到货' },
+  { label: '卖家未发货', value: '卖家未发货' },
+  { label: '其他原因', value: '其他原因' },
+]
+
+function openShipModal() {
+  trackingNumber.value = order.value?.tracking_number || ''
+  logisticsCompany.value = order.value?.logistics_company || ''
+  showShipModal.value = true
+}
+
+function closeShipModal() {
+  showShipModal.value = false
+}
+
+async function submitShip() {
+  if (!order.value) return
+  actionLoading.value = true
+  try {
+    await orderAPI.ship(order.value.id, {
+      tracking_number: trackingNumber.value || undefined,
+      logistics_company: logisticsCompany.value || undefined,
+    })
+    message.success('已标记为发货')
+    showShipModal.value = false
+    await loadOrder()
+    await loadStatusLogs()
+  } catch (err: any) {
+    const msg = err?.response?.data?.message || '操作失败'
+    message.error(msg)
+  } finally {
+    actionLoading.value = false
+  }
+}
 
 const isBuyer = computed(() => {
   if (!order.value || !authStore.user) return false
@@ -262,8 +388,11 @@ function formatLogEvent(log: any): string {
   }
   // 仲裁包含决定：arbitrate:buyer
   if (event.startsWith('arbitrate:')) {
-    const decision = event.split(':')[1]
-    return `仲裁结果：${decision === 'buyer' ? '支持买家' : '支持卖家'}`
+    const parts = event.split(':')
+    const decision = parts.length > 1 ? parts[1] : ''
+    if (decision === 'buyer') return '仲裁结果：支持买家'
+    if (decision === 'seller') return '仲裁结果：支持卖家'
+    return `仲裁结果：${decision}`
   }
   // 常规事件名转中文
   const eventNames: Record<string, string> = {
@@ -335,6 +464,27 @@ async function loadStatusLogs() {
   }
 }
 
+// ========== 联系对方 ==========
+
+async function handleContact() {
+  if (!order.value) return
+  contactLoading.value = true
+  try {
+    // 创建或获取与对方的会话，买家视角传 seller_id，卖家视角传 buyer_id
+    const targetID = isBuyer.value ? order.value.seller_id : order.value.buyer_id
+    const conv = await chatAPI.createConversation({
+      product_id: order.value.product_id,
+      seller_id: isBuyer.value ? order.value.seller_id : targetID,
+    })
+    router.push(`/chat/${conv.id}`)
+  } catch (err: any) {
+    const msg = err?.response?.data?.message || '跳转到聊天失败'
+    message.error(msg)
+  } finally {
+    contactLoading.value = false
+  }
+}
+
 // ========== 买家操作 ==========
 
 async function handlePay() {
@@ -403,55 +553,44 @@ async function handleConfirmReceive() {
 
 function handleRequestRefund() {
   if (!order.value) return
-  dialog.warning({
-    title: '申请退款',
-    content: '确定要申请退款吗？退款需要卖家确认处理。',
-    positiveText: '申请退款',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      actionLoading.value = true
-      try {
-        await orderAPI.requestRefund(order.value!.id)
-        message.success('退款申请已提交')
-        await loadOrder()
-        await loadStatusLogs()
-      } catch (err: any) {
-        const msg = err?.response?.data?.message || '申请失败'
-        message.error(msg)
-      } finally {
-        actionLoading.value = false
-      }
-    },
-  })
+  refundReason.value = null
+  refundNote.value = ''
+  showRefundModal.value = true
+}
+
+function closeRefundModal() {
+  showRefundModal.value = false
+  refundReason.value = null
+  refundNote.value = ''
+}
+
+async function submitRefund() {
+  if (!order.value) return
+  if (!refundReason.value) {
+    message.warning('请选择退款原因')
+    return
+  }
+  actionLoading.value = true
+  try {
+    await orderAPI.requestRefund(order.value!.id, {
+      reason: refundReason.value,
+      note: refundNote.value || undefined,
+    })
+    message.success('退款申请已提交')
+    showRefundModal.value = false
+    await loadOrder()
+    await loadStatusLogs()
+  } catch (err: any) {
+    const msg = err?.response?.data?.message || '申请失败'
+    message.error(msg)
+  } finally {
+    actionLoading.value = false
+  }
 }
 
 // ========== 卖家操作 ==========
 
-async function handleShip() {
-  if (!order.value) return
-  dialog.info({
-    title: '确认发货',
-    content: '确定要标记该订单为已发货吗？',
-    positiveText: '确认发货',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      actionLoading.value = true
-      try {
-        await orderAPI.ship(order.value!.id)
-        message.success('已标记为发货')
-        await loadOrder()
-        await loadStatusLogs()
-      } catch (err: any) {
-        const msg = err?.response?.data?.message || '操作失败'
-        message.error(msg)
-      } finally {
-        actionLoading.value = false
-      }
-    },
-  })
-}
-
-function handleApproveRefund() {
+async function handleApproveRefund() {
   if (!order.value) return
   dialog.warning({
     title: '同意退款',

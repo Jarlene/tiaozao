@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// TODO: 对登录/注册接口添加基于 IP 的限流保护（如 5 次/分钟），防止暴力破解
+
 type AuthHandler struct {
 	authService *service.AuthService
 }

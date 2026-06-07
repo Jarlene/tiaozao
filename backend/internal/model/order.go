@@ -43,6 +43,10 @@ type Order struct {
 	Title            string         `gorm:"size:200;not null" json:"title"`              // 快照：下单时商品标题
 	Price            int64          `gorm:"not null" json:"price"`                       // 快照：下单时商品价格（分）
 	Status           OrderStatus    `gorm:"default:1;not null;index" json:"status"`
+	PreRefundStatus  OrderStatus    `gorm:"default:0;not null" json:"pre_refund_status"` // 退款前状态（Shipped/Received），用于退款资金处理
+	RefundReason     string         `gorm:"type:text" json:"refund_reason,omitempty"`   // 退款原因
+	TrackingNumber   string         `gorm:"size:100" json:"tracking_number,omitempty"`   // 快递单号
+	LogisticsCompany string         `gorm:"size:50" json:"logistics_company,omitempty"`  // 物流公司
 	ShippingAddress  string         `gorm:"type:text;not null" json:"shipping_address"`  // 收货地址
 	BuyerNote        string         `gorm:"type:text" json:"buyer_note,omitempty"`       // 买家留言`
 	CreatedAt time.Time      `json:"created_at"`
@@ -64,7 +68,7 @@ type OrderStatusLog struct {
 	OrderID      uint        `gorm:"not null;index" json:"order_id"`
 	FromStatus   OrderStatus `gorm:"not null" json:"from_status"`
 	ToStatus     OrderStatus `gorm:"not null" json:"to_status"`
-	Event        string      `gorm:"size:50;not null" json:"event"`
+	Event        string      `gorm:"size:500;not null" json:"event"`
 	OperatorID   uint        `gorm:"not null" json:"operator_id"`
 	OperatorType string      `gorm:"size:20;not null" json:"operator_type"` // buyer, seller, admin, system
 	CreatedAt    time.Time   `json:"created_at"`

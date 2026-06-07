@@ -28,6 +28,7 @@ const (
 	// 权限
 	ErrForbidden = 40301 // 无权限操作
 	ErrCannotReviewOwn = 40302 // 不能评价自己的商品
+	ErrForbiddenNotAdmin = 40303 // 非管理员
 
 	// 资源
 	ErrProductNotFound  = 40401
@@ -48,6 +49,9 @@ const (
 
 	// 库存
 	ErrInsufficientStock = 40013 // 库存不足
+
+	// 钱包
+	ErrInsufficientBalance = 40014 // 余额不足
 )
 
 var MessageMap = map[int]string{
@@ -76,4 +80,6 @@ var MessageMap = map[int]string{
 	ErrReviewNotFound:     "评论不存在",
 	ErrOrderNotFound:      "订单不存在",
 	ErrInsufficientStock:  "库存不足",
+	ErrInsufficientBalance: "余额不足",
+	ErrForbiddenNotAdmin:  "仅管理员可执行此操作",
 }

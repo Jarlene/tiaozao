@@ -38,6 +38,9 @@ export interface OrderDetail {
   status_name: string
   shipping_address: string
   buyer_note: string
+  refund_reason?: string
+  tracking_number?: string
+  logistics_company?: string
   created_at: string
   updated_at: string
   product?: OrderProductItem
@@ -84,6 +87,15 @@ export const orderAPI = {
   },
 
   /**
+   * 管理员获取纠纷订单列表
+   */
+  listDisputes(params: { page?: number; size?: number }) {
+    return client
+      .get<ApiResponse<PaginatedResult<OrderDetail>>>('/orders/disputes', { params })
+      .then((r) => r.data.data)
+  },
+
+  /**
    * 获取订单详情
    */
   getById(id: number) {
@@ -107,8 +119,8 @@ export const orderAPI = {
   /**
    * 发货
    */
-  ship(id: number) {
-    return client.post<ApiResponse<null>>(`/orders/${id}/ship`).then((r) => r.data)
+  ship(id: number, data?: { tracking_number?: string; logistics_company?: string }) {
+    return client.post<ApiResponse<null>>(`/orders/${id}/ship`, data).then((r) => r.data)
   },
 
   /**
@@ -121,8 +133,8 @@ export const orderAPI = {
   /**
    * 申请退款
    */
-  requestRefund(id: number) {
-    return client.post<ApiResponse<null>>(`/orders/${id}/refund`).then((r) => r.data)
+  requestRefund(id: number, data?: { reason: string; note?: string }) {
+    return client.post<ApiResponse<null>>(`/orders/${id}/refund`, data).then((r) => r.data)
   },
 
   /**

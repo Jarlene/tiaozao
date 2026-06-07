@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler *handler.ProductHandler, categoryHandler *handler.CategoryHandler, reviewHandler *handler.ReviewHandler, chatHandler *handler.ChatHandler, wsHandler *chat.WSHandler, orderHandler *handler.OrderHandler, logger *zap.Logger) *gin.Engine {
+func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler *handler.ProductHandler, categoryHandler *handler.CategoryHandler, reviewHandler *handler.ReviewHandler, chatHandler *handler.ChatHandler, wsHandler *chat.WSHandler, orderHandler *handler.OrderHandler, walletHandler *handler.WalletHandler, logger *zap.Logger) *gin.Engine {
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -128,9 +128,10 @@ func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler 
 	protectedOrders := r.Group("/api/v1/orders")
 	protectedOrders.Use(middleware.AuthMiddleware(&cfg.JWT))
 	{
-		// 注意：/mine 和 /sold 必须在 /:id 之前注册
+		// 注意：/mine, /sold, /disputes 必须在 /:id 之前注册
 		protectedOrders.GET("/mine", orderHandler.ListMine)
 		protectedOrders.GET("/sold", orderHandler.ListSold)
+		protectedOrders.GET("/disputes", orderHandler.ListDisputes)
 		protectedOrders.POST("", orderHandler.Create)
 		protectedOrders.GET("/:id", orderHandler.GetByID)
 		protectedOrders.POST("/:id/cancel", orderHandler.Cancel)
@@ -138,10 +139,21 @@ func Setup(cfg *config.Config, authHandler *handler.AuthHandler, productHandler 
 		protectedOrders.POST("/:id/ship", orderHandler.Ship)
 		protectedOrders.POST("/:id/confirm", orderHandler.ConfirmReceive)
 		protectedOrders.POST("/:id/refund", orderHandler.RequestRefund)
+		protectedOrders.POST("/:id/refund/approve", orderHandler.ApproveRefund)
+		protectedOrders.POST("/:id/refund/reject", orderHandler.RejectRefund)
 		protectedOrders.POST("/:id/refund/complete", orderHandler.CompleteRefund)
 		protectedOrders.POST("/:id/dispute", orderHandler.RaiseDispute)
 		protectedOrders.POST("/:id/arbitrate", orderHandler.Arbitrate)
 		protectedOrders.GET("/:id/logs", orderHandler.GetStatusLogs)
+	}
+
+	// 钱包路由（需要登录）
+	protectedWallet := r.Group("/api/v1/wallet")
+	protectedWallet.Use(middleware.AuthMiddleware(&cfg.JWT))
+	{
+		protectedWallet.GET("", walletHandler.GetWallet)
+		protectedWallet.POST("/topup", walletHandler.TopUp)
+		protectedWallet.GET("/transactions", walletHandler.ListTransactions)
 	}
 
 	return r
