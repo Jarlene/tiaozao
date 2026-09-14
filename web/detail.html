@@ -19,6 +19,23 @@
   <main class="container">
     <a href="/" class="back-link">&larr; 返回列表</a>
     <div id="productDetail" class="product-detail"></div>
+    <div id="commentsSection" class="comments-section">
+      <h2>商品评价</h2>
+      <div class="comment-form">
+        <div class="rating-picker">
+          <span>评分：</span>
+          <span class="stars" id="ratingStars" data-rating="0">
+            <span data-value="1">★</span><span data-value="2">★</span><span data-value="3">★</span><span data-value="4">★</span><span data-value="5">★</span>
+          </span>
+          <span id="ratingHint" class="comment-time">（点击星星选择 1-5 分，可不选）</span>
+        </div>
+        <textarea id="commentContent" placeholder="分享你对这件商品的评价..."></textarea>
+        <div style="margin-top: 12px; text-align: right;">
+          <button type="button" class="btn-primary" onclick="submitComment()">发表评价</button>
+        </div>
+      </div>
+      <div id="commentList" class="comments-empty">加载中...</div>
+    </div>
   </main>
   <script src="/static/app.js"></script>
 </body>

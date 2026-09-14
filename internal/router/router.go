@@ -13,18 +13,27 @@ import (
 	"github.com/go-chi/cors"
 )
 
+type Handlers struct {
+	Category *handler.CategoryHandler
+	Product  *handler.ProductHandler
+	Comment  *handler.CommentHandler
+}
+
 func Setup(
 	uploadDir string,
-	categoryHandler *handler.CategoryHandler,
-	productHandler *handler.ProductHandler,
+	allowedOrigins []string,
+	h Handlers,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Middleware
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"http://localhost:8080"}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-User-Id"},
 		AllowCredentials: false,
@@ -47,21 +56,28 @@ func Setup(
 
 		// Category routes
 		r.Route("/categories", func(r chi.Router) {
-			r.Post("/", categoryHandler.Create)
-			r.Put("/{id}", categoryHandler.Update)
-			r.Delete("/{id}", categoryHandler.Delete)
-			r.Get("/{id}", categoryHandler.Get)
-			r.Get("/", categoryHandler.List)
+			r.Post("/", h.Category.Create)
+			r.Put("/{id}", h.Category.Update)
+			r.Delete("/{id}", h.Category.Delete)
+			r.Get("/{id}", h.Category.Get)
+			r.Get("/", h.Category.List)
 		})
 
 		// Product routes
 		r.Route("/products", func(r chi.Router) {
-			r.Post("/", productHandler.Create)
-			r.Put("/{id}", productHandler.Update)
-			r.Put("/{id}/delist", productHandler.Delist)
-			r.Get("/{id}", productHandler.Get)
-			r.Get("/", productHandler.List)
-			r.Post("/images", productHandler.UploadImage)
+			r.Post("/", h.Product.Create)
+			r.Put("/{id}", h.Product.Update)
+			r.Put("/{id}/delist", h.Product.Delist)
+			r.Get("/{id}", h.Product.Get)
+			r.Get("/", h.Product.List)
+			r.Post("/images", h.Product.UploadImage)
+
+			// Comment routes (nested under products)
+			r.Route("/{productId}/comments", func(r chi.Router) {
+				r.Get("/", h.Comment.ListComments)
+				r.Post("/", h.Comment.CreateComment)
+				r.Post("/{commentId}/reply", h.Comment.ReplyToComment)
+			})
 		})
 	})
 

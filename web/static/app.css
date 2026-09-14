@@ -56,3 +56,27 @@ input:focus, textarea:focus { outline: none; border-color: #e74c3c; }
 .product-detail .description { line-height: 1.8; color: #555; }
 .back-link { display: inline-block; margin-bottom: 16px; color: #555; text-decoration: none; }
 .back-link:hover { color: #e74c3c; }
+
+/* Rating stars */
+.stars { color: #f5a623; font-size: 18px; letter-spacing: 2px; }
+.stars .empty { color: #ddd; }
+.rating-summary { margin-bottom: 16px; color: #888; font-size: 14px; }
+
+/* Comments */
+.comments-section { margin-top: 32px; }
+.comments-section h2 { font-size: 20px; margin-bottom: 16px; }
+.comment-form { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+.comment-form textarea { resize: vertical; min-height: 80px; }
+.rating-picker { margin-bottom: 12px; }
+.rating-picker .stars { cursor: pointer; font-size: 28px; }
+.comment-item { border-bottom: 1px solid #eee; padding: 16px 0; }
+.comment-item:last-child { border-bottom: none; }
+.comment-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.comment-user { font-weight: 600; color: #333; }
+.comment-time { color: #999; font-size: 12px; }
+.comment-content { color: #444; line-height: 1.6; margin: 6px 0; }
+.comment-replies { margin-left: 32px; padding-left: 16px; border-left: 2px solid #f0f0f0; margin-top: 8px; }
+.reply-form { margin-top: 8px; }
+.reply-form input { flex: 1; }
+.reply-toggle { background: none; border: none; color: #e74c3c; font-size: 13px; cursor: pointer; padding: 0; }
+.comments-empty { color: #999; padding: 16px 0; }
