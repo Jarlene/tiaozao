@@ -18,13 +18,16 @@ func NewProductRepository(pool *pgxpool.Pool) *ProductRepository {
 	return &ProductRepository{pool: pool}
 }
 
+const productColumns = `id, title, description, price, original_price, status, stock, sales, is_featured, category_id, seller_id, created_at, updated_at`
+
 func (r *ProductRepository) Create(ctx context.Context, product *model.Product) error {
 	return r.pool.QueryRow(ctx,
-		`INSERT INTO products (title, description, price, original_price, status, category_id, seller_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+		`INSERT INTO products (title, description, price, original_price, status, stock, sales, is_featured, category_id, seller_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
 		 RETURNING id, created_at, updated_at`,
 		product.Title, product.Description, product.Price, product.OriginalPrice,
-		product.Status, product.CategoryID, product.SellerID,
+		product.Status, product.Stock, product.Sales, product.IsFeatured,
+		product.CategoryID, product.SellerID,
 	).Scan(&product.ID, &product.CreatedAt, &product.UpdatedAt)
 }
 
@@ -39,10 +42,11 @@ func (r *ProductRepository) Update(ctx context.Context, id uint, updates map[str
 func (r *ProductRepository) GetByID(ctx context.Context, id uint) (*model.Product, error) {
 	p := &model.Product{}
 	row := r.pool.QueryRow(ctx,
-		`SELECT id, title, description, price, original_price, status, category_id, seller_id, created_at, updated_at
+		`SELECT `+productColumns+`
 		 FROM products WHERE id = $1`, id)
 	err := row.Scan(&p.ID, &p.Title, &p.Description, &p.Price, &p.OriginalPrice,
-		&p.Status, &p.CategoryID, &p.SellerID, &p.CreatedAt, &p.UpdatedAt)
+		&p.Status, &p.Stock, &p.Sales, &p.IsFeatured, &p.CategoryID, &p.SellerID,
+		&p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +75,7 @@ type ProductListQuery struct {
 	Page       int
 	Size       int
 	CategoryID *uint
-	Status     string
+	Status     int
 	SellerID   *uint
 }
 
@@ -85,13 +89,13 @@ func (r *ProductRepository) List(ctx context.Context, q ProductListQuery) ([]mod
 		args = append(args, *q.CategoryID)
 		argIdx++
 	}
-	if q.Status != "" {
+	if q.Status != 0 {
 		where = append(where, fmt.Sprintf("status = $%d", argIdx))
 		args = append(args, q.Status)
 		argIdx++
 	} else {
 		where = append(where, fmt.Sprintf("status = $%d", argIdx))
-		args = append(args, string(model.ProductStatusActive))
+		args = append(args, int(model.ProductStatusActive))
 		argIdx++
 	}
 	if q.SellerID != nil {
@@ -112,7 +116,7 @@ func (r *ProductRepository) List(ctx context.Context, q ProductListQuery) ([]mod
 	// Fetch
 	offset := (q.Page - 1) * q.Size
 	dataQuery := fmt.Sprintf(
-		`SELECT id, title, description, price, original_price, status, category_id, seller_id, created_at, updated_at
+		`SELECT `+productColumns+`
 		 FROM products WHERE %s ORDER BY updated_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argIdx, argIdx+1)
 	dataArgs := append(args, q.Size, offset)
@@ -127,7 +131,8 @@ func (r *ProductRepository) List(ctx context.Context, q ProductListQuery) ([]mod
 	for rows.Next() {
 		var p model.Product
 		if err := rows.Scan(&p.ID, &p.Title, &p.Description, &p.Price, &p.OriginalPrice,
-			&p.Status, &p.CategoryID, &p.SellerID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.Status, &p.Stock, &p.Sales, &p.IsFeatured, &p.CategoryID, &p.SellerID,
+			&p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		products = append(products, p)

@@ -12,22 +12,27 @@ import (
 
 type ProductService struct {
 	repo         *repository.ProductRepository
+	commentRepo  CommentStore
 	imageService *ImageService
 }
 
-func NewProductService(repo *repository.ProductRepository, imgSvc *ImageService) *ProductService {
+func NewProductService(repo *repository.ProductRepository, commentRepo CommentStore, imgSvc *ImageService) *ProductService {
 	return &ProductService{
 		repo:         repo,
+		commentRepo:  commentRepo,
 		imageService: imgSvc,
 	}
 }
 
 func (s *ProductService) Create(ctx context.Context, product *model.Product, imageIDs []uint, coverImageID *uint) error {
 	if product.Title == "" {
-		return errors.New("title is required")
+		return ErrInvalidInput
 	}
 	if product.Price < 0 {
-		return errors.New("price must be non-negative")
+		return ErrInvalidInput
+	}
+	if !product.Status.Valid() {
+		return ErrInvalidInput
 	}
 	if err := s.repo.Create(ctx, product); err != nil {
 		return err
@@ -38,34 +43,48 @@ func (s *ProductService) Create(ctx context.Context, product *model.Product, ima
 	return nil
 }
 
-func (s *ProductService) Update(ctx context.Context, id uint, userID string, updates map[string]any) error {
+func (s *ProductService) Update(ctx context.Context, id uint, userID uint, updates map[string]any) error {
 	sellerID, err := s.repo.GetProductSellerID(ctx, id)
 	if err != nil {
-		return errors.New("product not found")
+		return ErrNotFound
 	}
-	uid, _ := parseUint(userID)
-	if uid != 0 && sellerID != uid {
-		return errors.New("forbidden")
+	if userID == 0 || sellerID != userID {
+		return ErrForbidden
 	}
 	return s.repo.Update(ctx, id, updates)
 }
 
-func (s *ProductService) Delist(ctx context.Context, id uint, userID string) error {
-	return s.Update(ctx, id, userID, map[string]any{"status": model.ProductStatusInactive})
+func (s *ProductService) Delist(ctx context.Context, id uint, userID uint) error {
+	sellerID, err := s.repo.GetProductSellerID(ctx, id)
+	if err != nil {
+		return ErrNotFound
+	}
+	if userID == 0 || sellerID != userID {
+		return ErrForbidden
+	}
+	return s.repo.Update(ctx, id, map[string]any{"status": model.ProductStatusOffline})
 }
 
 func (s *ProductService) GetByID(ctx context.Context, id uint) (*model.Product, error) {
 	p, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("product not found")
+			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	// Attach aggregate rating summary from reviews (aggregation logic).
+	if s.commentRepo != nil {
+		rating, err := s.commentRepo.GetProductRating(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		p.Rating = rating
 	}
 	return p, nil
 }
 
-func (s *ProductService) List(ctx context.Context, page, size int, categoryID *uint, status string, sellerID *uint) ([]model.Product, int64, error) {
+func (s *ProductService) List(ctx context.Context, page, size int, categoryID *uint, status int, sellerID *uint) ([]model.Product, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -88,15 +107,4 @@ func (s *ProductService) SaveImage(ctx context.Context, filename string, reader 
 
 func (s *ProductService) CreateImageRecord(ctx context.Context, url string) (uint, error) {
 	return s.repo.CreateImage(ctx, url)
-}
-
-func parseUint(s string) (uint, error) {
-	var id uint
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, errors.New("invalid uint")
-		}
-		id = id*10 + uint(c-'0')
-	}
-	return id, nil
 }

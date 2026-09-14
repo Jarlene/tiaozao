@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -30,12 +31,21 @@ func AuthStub(next http.Handler) http.Handler {
 			}
 		}
 
-		ctx := context.WithValue(r.Context(), UserIDKey, userID)
+		id, err := strconv.ParseUint(userID, 10, 64)
+		if err != nil {
+			http.Error(w, `{"error":"invalid user id"}`, http.StatusBadRequest)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), UserIDKey, uint(id))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func GetUserID(ctx context.Context) string {
-	userID, _ := ctx.Value(UserIDKey).(string)
+// GetUserID returns the authenticated user's numeric ID. Handlers rely on
+// this being a uint so that foreign keys and IDs stay consistent across
+// the whole schema (no string/review agent drift).
+func GetUserID(ctx context.Context) uint {
+	userID, _ := ctx.Value(UserIDKey).(uint)
 	return userID
 }

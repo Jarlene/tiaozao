@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -26,7 +27,7 @@ func NewProductHandler(svc *service.ProductService) *ProductHandler {
 
 func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
-	if userID == "" {
+	if userID == 0 {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
@@ -53,7 +54,6 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sellerID, _ := strconv.ParseUint(userID, 10, 64)
 	var origPrice *float64
 	if req.OriginalPrice > 0 {
 		origPrice = &req.OriginalPrice
@@ -64,13 +64,13 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:   req.Description,
 		Price:         req.Price,
 		OriginalPrice: origPrice,
-		Status:        model.ProductStatusDraft,
+		Status:        model.ProductStatusActive,
 		CategoryID:    req.CategoryID,
-		SellerID:      uint(sellerID),
+		SellerID:      userID,
 	}
 
 	if err := h.svc.Create(r.Context(), product, req.ImageIDs, req.CoverImageID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusCreated, product)
@@ -90,10 +90,15 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Price         *float64 `json:"price"`
 		OriginalPrice *float64 `json:"original_price"`
 		CategoryID    *uint    `json:"category_id"`
-		Status        *string  `json:"status"`
+		Status        *int     `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+
+	if req.Status != nil && !model.ProductStatus(*req.Status).Valid() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid status"})
 		return
 	}
 
@@ -118,7 +123,14 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Update(r.Context(), uint(id), userID, updates); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "product not found"})
+		case errors.Is(err, service.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "updated"})
@@ -132,7 +144,14 @@ func (h *ProductHandler) Delist(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := middleware.GetUserID(r.Context())
 	if err := h.svc.Delist(r.Context(), uint(id), userID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "product not found"})
+		case errors.Is(err, service.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "delisted"})
@@ -146,7 +165,12 @@ func (h *ProductHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	product, err := h.svc.GetByID(r.Context(), uint(id))
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "product not found"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, product)
@@ -155,7 +179,14 @@ func (h *ProductHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
-	status := r.URL.Query().Get("status")
+
+	var status int
+	if s := r.URL.Query().Get("status"); s != "" {
+		v, err := strconv.Atoi(s)
+		if err == nil {
+			status = v
+		}
+	}
 
 	var categoryID *uint
 	if cid := r.URL.Query().Get("category_id"); cid != "" {
