@@ -1,0 +1,79 @@
+/* 五子棋页面样式 */
+.gomoku-page h1 { font-size: 28px; margin: 8px 0 4px; }
+.subtitle { color: #888; font-size: 14px; margin-bottom: 20px; }
+
+.game-area {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.board-wrap {
+  background: #d9a862;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+#board { display: block; cursor: pointer; max-width: 100%; height: auto; }
+
+.sidebar { min-width: 220px; flex: 1; max-width: 320px; }
+
+.turn-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 18px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.stone {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.stone.black { background: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+.stone.white { background: #f5f5f5; border: 2px solid #bbb; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+
+.status-box {
+  margin: 16px 0;
+  min-height: 24px;
+  font-size: 16px;
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+.actions { display: flex; gap: 12px; margin-bottom: 20px; }
+.actions .btn {
+  flex: 1;
+  padding: 10px 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  color: #555;
+}
+.actions .btn:hover { background: #f0f0f0; }
+.actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.actions .btn-primary { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+.actions .btn-primary:hover:not(:disabled) { background: #c0392b; }
+
+.rules {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px 16px 16px 32px;
+  font-size: 14px;
+  color: #555;
+  line-height: 1.8;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}

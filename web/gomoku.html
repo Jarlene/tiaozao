@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>五子棋</title>
+  <link rel="stylesheet" href="/static/gomoku.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="/" class="brand">跳蚤市场</a>
+      <div class="nav-links">
+        <a href="/">首页</a>
+        <a href="/publish.html">发布商品</a>
+        <a href="/gomoku.html">五子棋</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container gomoku-page">
+    <h1>五子棋</h1>
+    <p class="subtitle">本地双人对战，黑先白后，五子连珠获胜</p>
+
+    <div class="game-area">
+      <div class="board-wrap">
+        <canvas id="board" width="640" height="640" aria-label="五子棋棋盘"></canvas>
+      </div>
+
+      <div class="sidebar">
+        <div id="turnInfo" class="turn-box">
+          <span class="stone black" aria-hidden="true"></span>
+          <span id="turnText">黑方落子</span>
+        </div>
+        <div id="gameStatus" class="status-box"></div>
+        <div class="actions">
+          <button id="undoBtn" class="btn" type="button">悔棋</button>
+          <button id="restartBtn" class="btn btn-primary" type="button">重新开始</button>
+        </div>
+        <ul class="rules">
+          <li>落子在棋盘交叉点上</li>
+          <li>黑白双方轮流各下一子</li>
+          <li>横、竖、斜任意方向五子连珠即获胜</li>
+          <li>棋盘下满且无人获胜则判为平局</li>
+        </ul>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/gomoku.js"></script>
+</body>
+</html>
